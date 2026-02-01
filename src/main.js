@@ -12,6 +12,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
 // --- WATER & RIVER GLOBALS ---
 let water, waterfall, waterfall2, foamSystem, foamUniforms, mistSystem, mistUniforms;
@@ -28,6 +30,113 @@ const riverParams = {
     width: 11.5,
     length: 100,
     waterfallDrop: 30
+};
+
+// Cinematic Parameters
+const cinematicParams = {
+    bloomStrength: 0.3,
+    bloomRadius: 0.6,
+    bloomThreshold: 0.7,
+    vignetteIntensity: 0.4,
+    saturation: 1.1,
+    contrast: 1.05
+};
+
+// Lighting Presets
+let currentPreset = 'goldenHour';
+const lightingPresets = {
+    goldenHour: {
+        name: 'Sunrise (East)',
+        sky: { turbidity: 2.5, rayleigh: 1.8, mieCoefficient: 0.08, mieDirectionalG: 0.95, elevation: 8, azimuth: 90 },  // East
+        fog: { color: 0xe8d8c8, density: 0.008 },
+        background: 0xd4c4b0,
+        dirLight: { color: 0xffd090, intensity: 5.0 },
+        hemiLight: { skyColor: 0xffffff, groundColor: 0x444444, intensity: 1.0 },
+        rimLight: { color: 0x8090ff, intensity: 1.5 },
+        ambient: { color: 0xffffff, intensity: 0.2 },
+        bloom: { strength: 0.3, threshold: 0.7 },
+        exposure: 1.2,
+        waterColor: 0x001122
+    },
+    sunset: {
+        name: 'Sunset (West)',
+        sky: { turbidity: 4.0, rayleigh: 2.5, mieCoefficient: 0.1, mieDirectionalG: 0.85, elevation: 3, azimuth: 270 },  // West
+        fog: { color: 0xd4a574, density: 0.01 },
+        background: 0xc07050,
+        dirLight: { color: 0xff6030, intensity: 4.0 },
+        hemiLight: { skyColor: 0xff9060, groundColor: 0x3a2a4a, intensity: 0.8 },
+        rimLight: { color: 0x6040a0, intensity: 2.0 },
+        ambient: { color: 0xff8866, intensity: 0.15 },
+        bloom: { strength: 0.5, threshold: 0.6 },
+        exposure: 1.0,
+        waterColor: 0x1a0a2a
+    },
+    night: {
+        name: 'Night',
+        sky: { turbidity: 0.1, rayleigh: 0.1, mieCoefficient: 0.005, mieDirectionalG: 0.8, elevation: -5, azimuth: 270 },  // Moon in west
+        fog: { color: 0x151530, density: 0.006 },
+        background: 0x0a0a20,
+        dirLight: { color: 0x80a0ee, intensity: 3.5 },  // Brighter moonlight
+        hemiLight: { skyColor: 0x3040aa, groundColor: 0x151525, intensity: 0.8 },
+        rimLight: { color: 0x6080cc, intensity: 2.5 },  // Stronger blue rim
+        ambient: { color: 0x2030aa, intensity: 0.8 },  // Much brighter ambient
+        bloom: { strength: 0.8, threshold: 0.4 },  // More bloom for glow
+        exposure: 1.1,  // Much higher exposure
+        waterColor: 0x0a1030
+    }
+};
+
+// Vignette + Color Grading Shader
+const CinematicShader = {
+    uniforms: {
+        'tDiffuse': { value: null },
+        'vignetteIntensity': { value: 0.4 },
+        'saturation': { value: 1.1 },
+        'contrast': { value: 1.05 },
+        'time': { value: 0.0 }
+    },
+    vertexShader: `
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    `,
+    fragmentShader: `
+        uniform sampler2D tDiffuse;
+        uniform float vignetteIntensity;
+        uniform float saturation;
+        uniform float contrast;
+        uniform float time;
+        varying vec2 vUv;
+        
+        void main() {
+            vec4 color = texture2D(tDiffuse, vUv);
+            
+            // Vignette
+            vec2 center = vUv - 0.5;
+            float dist = length(center);
+            float vignette = 1.0 - smoothstep(0.3, 0.9, dist * vignetteIntensity * 2.0);
+            color.rgb *= vignette;
+            
+            // Saturation
+            float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+            color.rgb = mix(vec3(gray), color.rgb, saturation);
+            
+            // Contrast
+            color.rgb = (color.rgb - 0.5) * contrast + 0.5;
+            
+            // Subtle warm tint for golden hour
+            color.r *= 1.02;
+            color.b *= 0.97;
+            
+            // Film grain (very subtle)
+            float grain = fract(sin(dot(vUv * time, vec2(12.9898, 78.233))) * 43758.5453);
+            color.rgb += (grain - 0.5) * 0.015;
+            
+            gl_FragColor = color;
+        }
+    `
 };
 
 const foamVertexShader = `
@@ -71,8 +180,8 @@ const foamFragmentShader = `
 
 // Setup
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xa0a0a0);
-scene.fog = new THREE.FogExp2(0xebe2db, 0.005); // Add soft fog for depth
+scene.background = new THREE.Color(0xd4c4b0); // Warmer background
+scene.fog = new THREE.FogExp2(0xe8d8c8, 0.008); // Thicker warm fog for cinematic depth
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 0.5, 1.5); // Closer to the small character
@@ -83,7 +192,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace; // Important for correct color rendering
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0; // Brighter scene
+renderer.toneMappingExposure = 1.2; // Cinematic exposure
 document.body.appendChild(renderer.domElement);
 
 // Crosshair (Removed)
@@ -108,10 +217,21 @@ const composer = new EffectComposer(renderer);
 const renderPass = new RenderPass(scene, camera);
 composer.addPass(renderPass);
 
-// SSAO Removed for cleaner look
-// const ssaoPass = new SSAOPass(scene, camera, window.innerWidth, window.innerHeight);
-// ...
-// composer.addPass(ssaoPass);
+// Cinematic Bloom Pass
+const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    cinematicParams.bloomStrength,
+    cinematicParams.bloomRadius,
+    cinematicParams.bloomThreshold
+);
+composer.addPass(bloomPass);
+
+// Cinematic Vignette + Color Grading Pass
+const cinematicPass = new ShaderPass(CinematicShader);
+cinematicPass.uniforms['vignetteIntensity'].value = cinematicParams.vignetteIntensity;
+cinematicPass.uniforms['saturation'].value = cinematicParams.saturation;
+cinematicPass.uniforms['contrast'].value = cinematicParams.contrast;
+composer.addPass(cinematicPass);
 
 const outputPass = new OutputPass();
 composer.addPass(outputPass);
@@ -136,7 +256,7 @@ const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
 hemiLight.position.set(0, 20, 0);
 scene.add(hemiLight);
 
-const dirLight = new THREE.DirectionalLight(0xffdfba, 4.0); // Brighter Warm Sun
+const dirLight = new THREE.DirectionalLight(0xffd090, 5.0); // Warmer, stronger golden sun
 dirLight.position.set(5, 15, 5);
 dirLight.castShadow = true;
 dirLight.shadow.mapSize.width = 4096; // Higher resolution shadows
@@ -151,6 +271,16 @@ dirLight.shadow.camera.bottom = -d;
 dirLight.shadow.camera.far = 100;
 scene.add(dirLight);
 
+// Cinematic Rim Light (backlight for dramatic silhouettes)
+const rimLight = new THREE.DirectionalLight(0x8090ff, 1.5);
+rimLight.position.set(-10, 8, -10);
+scene.add(rimLight);
+
+// Subtle fill light from opposite side
+const fillLight = new THREE.DirectionalLight(0xffeedd, 0.3);
+fillLight.position.set(-5, 3, 5);
+scene.add(fillLight);
+
 // --- Sky & Sun ---
 const sky = new Sky();
 sky.scale.setScalar(450000);
@@ -161,12 +291,12 @@ scene.add(sky);
 const sun = new THREE.Vector3();
 
 const effectController = {
-    turbidity: 1, // Lower turbidity = cleaner, sharper sky
-    rayleigh: 1.2, // Lower rayleigh = deeper blue/violet
-    mieCoefficient: 0.05,
-    mieDirectionalG: 0.9,
-    elevation: 15, // Lower sun = Golden Hour
-    azimuth: 180,
+    turbidity: 2.5, // Slightly hazy for cinematic atmosphere
+    rayleigh: 1.8, // Richer sky colors
+    mieCoefficient: 0.08, // More sun glow
+    mieDirectionalG: 0.95, // Tighter sun disc
+    elevation: 8, // Very low sun = Deep Golden Hour
+    azimuth: 160, // Angled for dramatic shadows
     exposure: renderer.toneMappingExposure
 };
 
@@ -186,12 +316,294 @@ uniforms[ 'sunPosition' ].value.copy( sun );
 // Match direction light to sun position for consistent shadows
 dirLight.position.copy(sun).multiplyScalar(50); // Move light far out
 
+// --- Moon, Sun & Stars (for time of day) ---
+let moon, moonGlow, stars, sunSphere;
+
+// Create Moon
+function createMoon() {
+    // Main moon sphere - bright white
+    const moonGeo = new THREE.SphereGeometry(12, 32, 32);
+    const moonMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        toneMapped: false  // Bypass tone mapping so it stays bright
+    });
+    moon = new THREE.Mesh(moonGeo, moonMat);
+    moon.visible = false;
+    scene.add(moon);
+    
+    // Moon glow effect - larger transparent sphere
+    const glowGeo = new THREE.SphereGeometry(25, 32, 32);
+    const glowMat = new THREE.ShaderMaterial({
+        uniforms: {
+            glowColor: { value: new THREE.Color(0xaaccff) },
+            viewVector: { value: new THREE.Vector3() }
+        },
+        vertexShader: `
+            varying vec3 vNormal;
+            void main() {
+                vNormal = normalize(normalMatrix * normal);
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: `
+            uniform vec3 glowColor;
+            varying vec3 vNormal;
+            void main() {
+                float intensity = pow(0.7 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 2.0);
+                gl_FragColor = vec4(glowColor, intensity * 0.6);
+            }
+        `,
+        side: THREE.BackSide,
+        blending: THREE.AdditiveBlending,
+        transparent: true,
+        depthWrite: false
+    });
+    moonGlow = new THREE.Mesh(glowGeo, glowMat);
+    moonGlow.visible = false;
+    scene.add(moonGlow);
+}
+
+// Create Sun Sphere (visible sun disc in sky)
+function createSunSphere() {
+    const sunGeo = new THREE.SphereGeometry(20, 32, 32);
+    const sunMat = new THREE.MeshBasicMaterial({
+        color: 0xffdd88,
+        transparent: true,
+        opacity: 0.95
+    });
+    sunSphere = new THREE.Mesh(sunGeo, sunMat);
+    sunSphere.visible = true; // Visible by default (Golden Hour starts)
+    scene.add(sunSphere);
+    
+    // Position sun initially
+    sunSphere.position.copy(sun).multiplyScalar(380);
+}
+
+// Create Starfield
+function createStars() {
+    const starCount = 3000;
+    const starGeo = new THREE.BufferGeometry();
+    const positions = new Float32Array(starCount * 3);
+    const sizes = new Float32Array(starCount);
+    
+    for (let i = 0; i < starCount; i++) {
+        // Distribute on a sphere
+        const radius = 400;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos((Math.random() * 2) - 1);
+        
+        positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+        positions[i * 3 + 1] = Math.abs(radius * Math.cos(phi)); // Only upper hemisphere
+        positions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta);
+        
+        sizes[i] = Math.random() * 2 + 0.5;
+    }
+    
+    starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    starGeo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+    
+    const starMat = new THREE.ShaderMaterial({
+        uniforms: {
+            time: { value: 0 },
+            color: { value: new THREE.Color(0xffffff) }
+        },
+        vertexShader: `
+            attribute float size;
+            uniform float time;
+            varying float vTwinkle;
+            void main() {
+                vTwinkle = 0.5 + 0.5 * sin(time * 2.0 + position.x * 0.1 + position.z * 0.1);
+                vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = size * vTwinkle * (200.0 / -mvPosition.z);
+                gl_Position = projectionMatrix * mvPosition;
+            }
+        `,
+        fragmentShader: `
+            uniform vec3 color;
+            varying float vTwinkle;
+            void main() {
+                float dist = length(gl_PointCoord - vec2(0.5));
+                if (dist > 0.5) discard;
+                float alpha = 1.0 - smoothstep(0.0, 0.5, dist);
+                gl_FragColor = vec4(color, alpha * vTwinkle);
+            }
+        `,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+    
+    stars = new THREE.Points(starGeo, starMat);
+    stars.visible = false; // Hidden by default
+    scene.add(stars);
+}
+
+createMoon();
+createStars();
+createSunSphere();
+
 // --- HDRI / IBL Environment ---
 // Use the Procedural Sky we created to light the scene massively improving realism.
 // The armor will now reflect the sky and sun.
 const pmremGenerator = new THREE.PMREMGenerator(renderer);
-const renderTarget = pmremGenerator.fromScene(scene);
+let renderTarget = pmremGenerator.fromScene(scene);
 scene.environment = renderTarget.texture;
+
+// --- Lighting Preset System ---
+function applyPreset(presetName) {
+    const preset = lightingPresets[presetName];
+    if (!preset) return;
+    
+    currentPreset = presetName;
+    
+    // Update Sky
+    const skyUniforms = sky.material.uniforms;
+    skyUniforms['turbidity'].value = preset.sky.turbidity;
+    skyUniforms['rayleigh'].value = preset.sky.rayleigh;
+    skyUniforms['mieCoefficient'].value = preset.sky.mieCoefficient;
+    skyUniforms['mieDirectionalG'].value = preset.sky.mieDirectionalG;
+    
+    const phi = THREE.MathUtils.degToRad(90 - preset.sky.elevation);
+    const theta = THREE.MathUtils.degToRad(preset.sky.azimuth);
+    sun.setFromSphericalCoords(1, phi, theta);
+    skyUniforms['sunPosition'].value.copy(sun);
+    
+    // Update Fog
+    scene.fog.color.setHex(preset.fog.color);
+    scene.fog.density = preset.fog.density;
+    scene.background.setHex(preset.background);
+    
+    // Update Lights
+    dirLight.color.setHex(preset.dirLight.color);
+    dirLight.intensity = preset.dirLight.intensity;
+    dirLight.position.copy(sun).multiplyScalar(50);
+    
+    hemiLight.color.setHex(preset.hemiLight.skyColor);
+    hemiLight.groundColor.setHex(preset.hemiLight.groundColor);
+    hemiLight.intensity = preset.hemiLight.intensity;
+    
+    rimLight.color.setHex(preset.rimLight.color);
+    rimLight.intensity = preset.rimLight.intensity;
+    
+    ambientLight.color.setHex(preset.ambient.color);
+    ambientLight.intensity = preset.ambient.intensity;
+    
+    // Update Bloom
+    bloomPass.strength = preset.bloom.strength;
+    bloomPass.threshold = preset.bloom.threshold;
+    
+    // Update Exposure
+    renderer.toneMappingExposure = preset.exposure;
+    
+    // Update Water Color
+    if (water) {
+        water.material.uniforms['waterColor'].value.setHex(preset.waterColor);
+        water.material.uniforms['sunDirection'].value.copy(sun).normalize();
+    }
+    if (waterfall) {
+        waterfall.material.uniforms['waterColor'].value.setHex(preset.waterColor);
+    }
+    if (waterfall2) {
+        waterfall2.material.uniforms['waterColor'].value.setHex(preset.waterColor);
+    }
+    
+    // Show/Hide Moon, Sun & Stars based on time of day
+    const isNight = presetName === 'night';
+    const isSunset = presetName === 'sunset';
+    
+    // Sun Sphere visibility and position
+    if (sunSphere) {
+        sunSphere.visible = !isNight;
+        if (!isNight) {
+            // Position sun in sky based on current sun direction
+            sunSphere.position.copy(sun).multiplyScalar(380);
+            
+            // Change sun color based on time
+            if (isSunset) {
+                sunSphere.material.color.setHex(0xff6030); // Deep orange/red for sunset
+                sunSphere.scale.setScalar(1.5); // Bigger sun at sunset
+            } else {
+                sunSphere.material.color.setHex(0xffdd88); // Golden for golden hour
+                sunSphere.scale.setScalar(1.0);
+            }
+        }
+    }
+    
+    // Moon visibility and position
+    if (moon) {
+        moon.visible = isNight;
+        if (moonGlow) moonGlow.visible = isNight;
+        
+        if (isNight) {
+            // Position moon based on light direction (opposite side for nice lighting)
+            const moonPhi = THREE.MathUtils.degToRad(90 - 25); // 25 degrees up
+            const moonTheta = THREE.MathUtils.degToRad(preset.sky.azimuth + 30);
+            const moonDir = new THREE.Vector3();
+            moonDir.setFromSphericalCoords(1, moonPhi, moonTheta);
+            moon.position.copy(moonDir).multiplyScalar(350);
+            
+            // Position glow at same location
+            if (moonGlow) moonGlow.position.copy(moon.position);
+            
+            // Update directional light to come from moon
+            dirLight.position.copy(moonDir).multiplyScalar(50);
+        }
+    }
+    if (stars) {
+        stars.visible = isNight;
+    }
+    
+    // Regenerate environment map for reflections
+    renderTarget.dispose();
+    renderTarget = pmremGenerator.fromScene(scene);
+    scene.environment = renderTarget.texture;
+    
+    // Update button text
+    if (presetButton) {
+        presetButton.textContent = preset.name;
+    }
+}
+
+function togglePreset() {
+    const presets = Object.keys(lightingPresets);
+    const currentIndex = presets.indexOf(currentPreset);
+    const nextIndex = (currentIndex + 1) % presets.length;
+    applyPreset(presets[nextIndex]);
+}
+
+// --- Preset Toggle Button ---
+const presetButton = document.createElement('button');
+presetButton.textContent = 'Golden Hour';
+presetButton.style.cssText = `
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    padding: 12px 24px;
+    font-size: 16px;
+    font-weight: bold;
+    color: white;
+    background: linear-gradient(135deg, #ff8c42, #d4556a, #9b59b6);
+    border: none;
+    border-radius: 25px;
+    cursor: pointer;
+    z-index: 1000;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    transition: transform 0.2s, box-shadow 0.2s;
+    font-family: 'Segoe UI', Arial, sans-serif;
+`;
+presetButton.addEventListener('mouseenter', () => {
+    presetButton.style.transform = 'scale(1.05)';
+    presetButton.style.boxShadow = '0 6px 20px rgba(0,0,0,0.4)';
+});
+presetButton.addEventListener('mouseleave', () => {
+    presetButton.style.transform = 'scale(1)';
+    presetButton.style.boxShadow = '0 4px 15px rgba(0,0,0,0.3)';
+});
+presetButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    togglePreset();
+});
+document.body.appendChild(presetButton);
 
 // --- WATER SETUP ---
 const waterGeometry = new THREE.PlaneGeometry( 9, 60, 60, 100 ); // Hardcoded base size to match scaling logic
@@ -204,16 +616,20 @@ water = new Water(
             texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
         } ),
         sunDirection: new THREE.Vector3(),
-        sunColor: 0xffffff,
-        waterColor: 0x003344,
-        distortionScale: 3.7,
-        fog: scene.fog !== undefined
+        sunColor: 0xffffee,
+        waterColor: 0x001122,
+        distortionScale: 5.0,
+        fog: scene.fog !== undefined,
+        alpha: 0.9
     }
 );
 water.rotation.x = - Math.PI / 2;
 water.position.y = riverParams.waterHeight;
 scene.add( water );
 water.material.uniforms[ 'sunDirection' ].value.copy( sun ).normalize();
+
+// Boost water reflectivity for cinematic shine
+water.material.uniforms[ 'size' ].value = 2.0; // Smaller ripples = sharper reflections
 updateWaterScale(); // Apply initial scale based on riverParams
 
 if (rocks.length > 0) {
@@ -281,6 +697,14 @@ gui.add( riverParams, 'waterZ', -200, 200 ).name('Water Z Pos').onChange( update
 gui.add( riverParams, 'width', 1, 300 ).name('Width').onChange( updateWaterScale );
 gui.add( riverParams, 'length', 1, 1000 ).name('Length').onChange( updateWaterScale );
 gui.add( riverParams, 'waterfallDrop', 5, 200 ).name('Waterfall H').onChange( updateRiverHeight ); // Update height triggers position recalc
+
+const folderCinematic = gui.addFolder('Cinematic');
+folderCinematic.add(cinematicParams, 'bloomStrength', 0, 2).name('Bloom').onChange(v => bloomPass.strength = v);
+folderCinematic.add(cinematicParams, 'bloomThreshold', 0, 1).name('Bloom Thresh').onChange(v => bloomPass.threshold = v);
+folderCinematic.add(cinematicParams, 'vignetteIntensity', 0, 1).name('Vignette').onChange(v => cinematicPass.uniforms['vignetteIntensity'].value = v);
+folderCinematic.add(cinematicParams, 'saturation', 0.5, 1.5).name('Saturation').onChange(v => cinematicPass.uniforms['saturation'].value = v);
+folderCinematic.add(cinematicParams, 'contrast', 0.8, 1.3).name('Contrast').onChange(v => cinematicPass.uniforms['contrast'].value = v);
+folderCinematic.open();
 
 
 // Create Simple Low Poly Clouds
@@ -478,7 +902,7 @@ fbxLoader.load('/models/Pro Sword and Shield Pack (1)/Paladin WProp J Nordstrom.
     character.scale.set(0.015, 0.015, 0.015); 
     
     // Spawn high up to ensure Raycast snaps down correctly (avoids getting stuck below ground)
-    character.position.set(0, 50, 0); // Explicitly set X, Y, Z to be sure 
+    character.position.set(0, 40, 0); // Explicitly set X, Y, Z to be sure 
 
     character.traverse((child) => {
         if (child.isMesh) {
@@ -600,6 +1024,16 @@ const downVector = new THREE.Vector3(0, -1, 0);
 function animate() {
     requestAnimationFrame(animate);
     
+    // Update Cinematic Shader Time (for film grain)
+    if (cinematicPass) {
+        cinematicPass.uniforms['time'].value = performance.now() * 0.001;
+    }
+    
+    // Update Stars Twinkle
+    if (stars && stars.visible) {
+        stars.material.uniforms.time.value = performance.now() * 0.001;
+    }
+    
     // Update Water System (from water.html)
     updateWater(performance.now() * 0.001);
 
@@ -625,9 +1059,9 @@ function animate() {
         // Find ground height under current position (before moving) to know "Old Ground Height"
         let oldGroundHeight = player.position.y;
         
-        // FIX: Raycast from just above player's head (e.g. +2.0) instead of sky (200)
-        // lowered to 0.8 to avoid detecting roofs as floor
-        const rayStartHeight = 0.8; 
+        // FIX: Raycast from lower height (0.6 - knee/waist) instead of head (2.0)
+        // This ensures the sensor is UNDER any roof/beam the player is standing under, preventing it from snapping up to the roof.
+        const rayStartHeight = 0.6; 
         raycaster.set(new THREE.Vector3(player.position.x, player.position.y + rayStartHeight, player.position.z), downVector);
         
         let intersects = raycaster.intersectObject(terrain, true);
@@ -678,7 +1112,7 @@ function animate() {
            
            // Jump Input
            if (keys.space && isGrounded) {
-               verticalVelocity = 8.0; // Jump force
+               verticalVelocity = 10.0; // Jump force
                isGrounded = false;
                
                // Play jump anim
@@ -719,36 +1153,38 @@ function animate() {
                 // Now we just move "Forward" in local space.
                 const worldMoveDir = new THREE.Vector3(0, 0, 1).applyQuaternion(player.quaternion);
                 
-                // Wall Collision Check (Enhanced with Whiskers)
+                // Wall Collision Check (Frontal)
+                // Check HEAD and KNEE to avoid walking into low beams or high ledges
                 let blocked = false;
                 
-                // We check 3 rays: Center, Left, and Right to handle character width
-                const origins = [];
-                const pPos = player.position.clone();
-                pPos.y += 0.8; // Raised check to chest/head level (avoids small steps)
+                // 1. Knee Check
+                const wallRayOriginKnee = player.position.clone();
+                wallRayOriginKnee.y += 0.5; 
+                raycaster.set(wallRayOriginKnee, worldMoveDir);
+                const kneeIntersects = raycaster.intersectObject(terrain, true);
+                if (kneeIntersects.length > 0 && kneeIntersects[0].distance < 0.8) {
+                    blocked = true;
+                }
 
-                // Calculate perpendicular offset for side rays
-                // worldMoveDir is (0,0,1) rotated by Quat. We need local X axis.
-                const localRight = new THREE.Vector3(1, 0, 0).applyQuaternion(player.quaternion);
-                const widthRadius = 0.4; // Detection width
-
-                origins.push(pPos); // Center
-                origins.push(pPos.clone().addScaledVector(localRight, widthRadius));  // Right Whisker
-                origins.push(pPos.clone().addScaledVector(localRight, -widthRadius)); // Left Whisker
-
-                // Also check Knee level for low obstacles if jumping is involved, 
-                // but for now chest level prevents walking into walls.
-                
-                // Increase check distance slightly to stop before visual clipping
-                // 0.8 was too close. 1.0 or 1.2 is safer for this scale.
-                const checkDist = 1.1; 
-
-                for (let o of origins) {
-                    raycaster.set(o, worldMoveDir);
-                    const wallIntersects = raycaster.intersectObject(terrain, true);
-                    if (wallIntersects.length > 0 && wallIntersects[0].distance < checkDist) {
+                // 2. Neck Check
+                if (!blocked) {
+                    const wallRayOriginNeck = player.position.clone();
+                    wallRayOriginNeck.y += 1; // Neck/Shoulder height
+                    raycaster.set(wallRayOriginNeck, worldMoveDir);
+                    const neckIntersects = raycaster.intersectObject(terrain, true);
+                    if (neckIntersects.length > 0 && neckIntersects[0].distance < 0.8) {
                         blocked = true;
-                        break;
+                    }
+                }
+
+                // 3. Head Check
+                if (!blocked) {
+                    const wallRayOriginHead = player.position.clone();
+                    wallRayOriginHead.y += 1.7; // Head height
+                    raycaster.set(wallRayOriginHead, worldMoveDir);
+                    const headIntersects = raycaster.intersectObject(terrain, true);
+                    if (headIntersects.length > 0 && headIntersects[0].distance < 0.8) {
+                        blocked = true;
                     }
                 }
 
@@ -805,15 +1241,39 @@ function animate() {
         }
 
         // Raycast AFTER movement to ensure we snap to the correct ground height for the NEW position
-        // FIX: Raycast from just above player (e.g. +2.0) instead of sky (200)
-        // Lowered to 0.8
+        // FIX: Raycast from Knee Height (0.6) so we stay UNDER roofs
         const rayOrigin = player.position.clone();
-        rayOrigin.y += 0.8; 
+        rayOrigin.y += 0.6; 
         
         raycaster.set(rayOrigin, downVector);
         
         // Check intersection with terrain
         intersects = raycaster.intersectObject(terrain, true);
+
+        // CEILING CHECK: Prevent clipping through floors from below
+        // Cast a ray UPWARD from feet to detect if there's a floor above us that we shouldn't pass through
+        const upVector = new THREE.Vector3(0, 1, 0);
+        const ceilingRayOrigin = player.position.clone();
+        ceilingRayOrigin.y += 0.2; // Start just above feet
+        raycaster.set(ceilingRayOrigin, upVector);
+        const ceilingIntersects = raycaster.intersectObject(terrain, true);
+        
+        if (ceilingIntersects.length > 0 && ceilingIntersects[0].distance < 1.8) {
+            // There's a ceiling/floor very close above our head
+            // Push player down to stay below it
+            const ceilingHeight = ceilingIntersects[0].point.y;
+            const maxPlayerY = ceilingHeight - 1.9; // Keep head 1.9 units below ceiling
+            if (player.position.y > maxPlayerY) {
+                player.position.y = maxPlayerY;
+                // Also stop upward velocity if we hit our head
+                if (verticalVelocity > 0) {
+                    verticalVelocity = 0;
+                }
+            }
+        }
+
+        // Reset raycaster for ground check
+        raycaster.set(rayOrigin, downVector);
         
         if (intersects.length > 0) {
             const newGroundHeight = intersects[0].point.y;
@@ -822,21 +1282,25 @@ function animate() {
 
             // "Don't Climb Props" Logic:
             // Check delta from OLD ground height. 
-            // If the ground under our feet spiked up > 0.5m, it is a wall (Collision).
+            // If the ground under our feet spiked up > step height, it is a wall (Collision).
+            const maxStepHeight = 0.6; // Increased from 0.3 to allow stepping over small bumps
             
-            // FIX: If we are JUMPING (player.y > newGroundHeight), ignore the wall check!
-            // We only collide if our *feet* are below the new platform level.
+            // FIX: Allow climbing if:
+            // 1. Player is jumping (has upward velocity)
+            // 2. Player is already above the obstacle (clearing it)
+            // 3. Player is in the air (not grounded)
+            const isJumping = verticalVelocity > 0;
             const isClearingObstacle = player.position.y > newGroundHeight;
+            const isInAir = !isGrounded;
 
-            // X/Z Revert Logic:
-            if (heightDiff > 0.5 && !isClearingObstacle) {
+            // X/Z Revert Logic - Only block if it's a real wall and we're not jumping over it
+            if (heightDiff > maxStepHeight && !isClearingObstacle && !isJumping && !isInAir) {
                  // Revert X/Z ONLY. Keep Y (gravity needs to work).
                 player.position.x = oldPosition.x;
                 player.position.z = oldPosition.z;
                 
                 // Re-raycast at reverted position to ensure we land on valid ground
-                // Lowered from 200 to oldPosition + 0.8
-                raycaster.set(new THREE.Vector3(player.position.x, oldPosition.y + 0.8, player.position.z), downVector);
+                raycaster.set(new THREE.Vector3(player.position.x, 200, player.position.z), downVector);
                 const wallIntersects = raycaster.intersectObject(terrain, true);
                 if (wallIntersects.length > 0) {
                      const validGround = wallIntersects[0].point.y;
@@ -994,10 +1458,11 @@ function createWaterfall() {
             texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
         }),
         sunDirection: new THREE.Vector3(),
-        sunColor: 0xffffff,
-        waterColor: 0x004455, // Slightly different color
-        distortionScale: 3.7,
-        fog: scene.fog !== undefined
+        sunColor: 0xffffee,
+        waterColor: 0x002233,
+        distortionScale: 6.0,
+        fog: scene.fog !== undefined,
+        alpha: 0.85
     });
     
     // Vertical Plane
@@ -1016,10 +1481,11 @@ function createWaterfall() {
             texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
         }),
         sunDirection: new THREE.Vector3(),
-        sunColor: 0xffffff,
-        waterColor: 0x004455,
-        distortionScale: 3.7,
-        fog: scene.fog !== undefined
+        sunColor: 0xffffee,
+        waterColor: 0x002233,
+        distortionScale: 6.0,
+        fog: scene.fog !== undefined,
+        alpha: 0.85
     });
     waterfall2.rotation.y = Math.PI; // Face the other way
     scene.add(waterfall2);
