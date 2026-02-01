@@ -12,7 +12,6 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
 // --- WATER & RIVER GLOBALS ---
 let water, waterfall, waterfall2, foamSystem, foamUniforms, mistSystem, mistUniforms;
@@ -21,9 +20,8 @@ const riverParams = {
     speed: 0.7,
     waveHeight: 0.33,
     flowAngle: 0,
-    foamAmount: 8910, 
-    foamSize: 0.4,
-    bloomStrength: 0,
+    foamAmount: 9000, 
+    foamSize: 0.3,
     waterHeight: 30.5,
     waterX: 2,
     waterZ: -1.2,
@@ -88,18 +86,27 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0; // Brighter scene
 document.body.appendChild(renderer.domElement);
 
+// Crosshair (Removed)
+/*
+const crosshair = document.createElement('div');
+crosshair.style.position = 'absolute';
+crosshair.style.top = '50%';
+crosshair.style.left = '50%';
+crosshair.style.width = '6px';
+crosshair.style.height = '6px';
+crosshair.style.background = 'white';
+crosshair.style.borderRadius = '50%';
+crosshair.style.transform = 'translate(-50%, -50%)';
+crosshair.style.pointerEvents = 'none';
+crosshair.style.zIndex = '1000';
+document.body.appendChild(crosshair);
+*/
+
 // --- Post-Processing Setup (SSAO) ---
 const composer = new EffectComposer(renderer);
 
 const renderPass = new RenderPass(scene, camera);
 composer.addPass(renderPass);
-
-// BLOOM (From water.html)
-const bloomPass = new UnrealBloomPass( new THREE.Vector2( window.innerWidth, window.innerHeight ), 1.5, 0.4, 0.85 );
-bloomPass.threshold = 0.2;
-bloomPass.strength = riverParams.bloomStrength;
-bloomPass.radius = 0.5;
-composer.addPass( bloomPass );
 
 // SSAO Removed for cleaner look
 // const ssaoPass = new SSAOPass(scene, camera, window.innerWidth, window.innerHeight);
@@ -113,7 +120,9 @@ composer.addPass(outputPass);
 const controls = new PointerLockControls(camera, document.body);
 
 // Click to lock
-document.addEventListener('click', () => {
+document.addEventListener('click', (event) => {
+    // Prevent locking if clicking on the GUI
+    if (event.target.closest('.lil-gui')) return;
     controls.lock();
 });
 
@@ -207,10 +216,44 @@ scene.add( water );
 water.material.uniforms[ 'sunDirection' ].value.copy( sun ).normalize();
 updateWaterScale(); // Apply initial scale based on riverParams
 
-// Rocks
-createRock(0, 0, 1.2);
-createRock(-2.0, 5, 0.9);
-createRock(2.5, -6, 1.0);
+if (rocks.length > 0) {
+    updateRiverHeight(); // Ensure any existing/new markers snap to water height
+}
+
+// Foam Markers
+createFoamMarker(4.56, 18.45, 0.5);
+createFoamMarker(6.03, 19.13, 0.5);
+createFoamMarker(5.99, 19.00, 0.5);
+createFoamMarker(6.02, 18.16, 0.5);
+createFoamMarker(4.72, 18.76, 0.5);
+createFoamMarker(5.40, 17.64, 0.5);
+createFoamMarker(4.88, 24.58, 0.5);
+createFoamMarker(5.55, 24.92, 0.5);
+createFoamMarker(3.88, 27.29, 0.5);
+createFoamMarker(5.87, 27.47, 0.5);
+createFoamMarker(1.79, 35.16, 0.5);
+createFoamMarker(1.99, 20.87, 0.5);
+createFoamMarker(1.59, 21.58, 0.5);
+createFoamMarker(2.62, 22.12, 0.5);
+createFoamMarker(-1.73, -5.82, 0.5);
+createFoamMarker(-2.54, -8.03, 0.5);
+createFoamMarker(2.82, -23.49, 0.5);
+createFoamMarker(1.35, -23.70, 0.5);
+createFoamMarker(2.36, -24.79, 0.5);
+createFoamMarker(-0.48, -1.48, 0.5);
+createFoamMarker(-1.90, -3.28, 0.5);
+createFoamMarker(-0.42, -3.34, 0.5);
+createFoamMarker(-2.15, 0.22, 0.5);
+createFoamMarker(4.46, 27.40, 0.5);
+createFoamMarker(4.87, 27.69, 0.5);
+createFoamMarker(2.03, 20.57, 0.5);
+createFoamMarker(1.71, 20.48, 0.5);
+createFoamMarker(1.79, 20.65, 0.5);
+createFoamMarker(2.79, 21.93, 0.5);
+createFoamMarker(2.01, 21.16, 0.5);
+createFoamMarker(2.62, 21.11, 0.5);
+createFoamMarker(1.32, 21.08, 0.5);
+createFoamMarker(2.01, 20.29, 0.5);
 
 // Foam
 createFoamSystem();
@@ -232,7 +275,6 @@ folderFoam.add( riverParams, 'foamSize', 0.01, 2.0 ).name('Particle Size').onCha
 });
 folderFoam.open();
 
-gui.add( riverParams, 'bloomStrength', 0, 2 ).name('Bloom Glow').onChange( (v) => bloomPass.strength = v );
 gui.add( riverParams, 'waterHeight', -20, 50 ).name('Water Y Level').onChange( updateRiverHeight );
 gui.add( riverParams, 'waterX', -100, 100 ).name('Water X Pos').onChange( updateRiverHeight );
 gui.add( riverParams, 'waterZ', -200, 200 ).name('Water Z Pos').onChange( updateRiverHeight );
@@ -326,8 +368,28 @@ document.addEventListener('keydown', (event) => {
         case 'd': keys.d = true; break;
         case 'shift': keys.shift = true; break;
         case ' ': keys.space = true; break;
+        // case 'p': placeFoamEmitter(); break;
     }
 });
+
+/*
+function placeFoamEmitter() {
+    // 1. Raycast from Camera Center
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(new THREE.Vector2(0, 0), camera);
+    
+    // 2. Intersect Water
+    const intersects = rc.intersectObject(water, false);
+    
+    if (intersects.length > 0) {
+        const p = intersects[0].point;
+        console.log(`Foam Emitter Added: { x: ${p.x.toFixed(2)}, z: ${p.z.toFixed(2)} }`);
+        console.log(`Copy/Paste Code: createFoamMarker(${p.x.toFixed(2)}, ${p.z.toFixed(2)}, 0.5);`);
+        
+        createFoamMarker(p.x, p.z, 0.5);
+    }
+}
+*/
 
 document.addEventListener('keyup', (event) => {
     switch(event.key.toLowerCase()) {
@@ -412,8 +474,8 @@ gltfLoader.load('/models/medieval_fantasy_book.glb', (gltf) => {
 fbxLoader.load('/models/Pro Sword and Shield Pack (1)/Paladin WProp J Nordstrom.fbx', (character) => {
     
     // FBX usually defaults to centimeters, so scale might need adjustment (0.01).
-    // Increased from 0.01 to 0.015 for slightly larger character
-    character.scale.set(0.013, 0.013, 0.013); 
+    // Increased from 0.013 to 0.015 for a little bigger character
+    character.scale.set(0.015, 0.015, 0.015); 
     
     // Spawn high up to ensure Raycast snaps down correctly (avoids getting stuck below ground)
     character.position.set(0, 50, 0); // Explicitly set X, Y, Z to be sure 
@@ -564,8 +626,8 @@ function animate() {
         let oldGroundHeight = player.position.y;
         
         // FIX: Raycast from just above player's head (e.g. +2.0) instead of sky (200)
-        // This allows us to walk UNDER roofs and bridges without detecting them as the floor.
-        const rayStartHeight = 2.0; 
+        // lowered to 0.8 to avoid detecting roofs as floor
+        const rayStartHeight = 0.8; 
         raycaster.set(new THREE.Vector3(player.position.x, player.position.y + rayStartHeight, player.position.z), downVector);
         
         let intersects = raycaster.intersectObject(terrain, true);
@@ -657,14 +719,37 @@ function animate() {
                 // Now we just move "Forward" in local space.
                 const worldMoveDir = new THREE.Vector3(0, 0, 1).applyQuaternion(player.quaternion);
                 
-                // Wall Collision Check (Frontal)
+                // Wall Collision Check (Enhanced with Whiskers)
                 let blocked = false;
-                const wallRayOrigin = player.position.clone();
-                wallRayOrigin.y += 0.5; 
-                raycaster.set(wallRayOrigin, worldMoveDir);
-                const wallIntersects = raycaster.intersectObject(terrain, true);
-                if (wallIntersects.length > 0 && wallIntersects[0].distance < 0.8) {
-                    blocked = true;
+                
+                // We check 3 rays: Center, Left, and Right to handle character width
+                const origins = [];
+                const pPos = player.position.clone();
+                pPos.y += 0.8; // Raised check to chest/head level (avoids small steps)
+
+                // Calculate perpendicular offset for side rays
+                // worldMoveDir is (0,0,1) rotated by Quat. We need local X axis.
+                const localRight = new THREE.Vector3(1, 0, 0).applyQuaternion(player.quaternion);
+                const widthRadius = 0.4; // Detection width
+
+                origins.push(pPos); // Center
+                origins.push(pPos.clone().addScaledVector(localRight, widthRadius));  // Right Whisker
+                origins.push(pPos.clone().addScaledVector(localRight, -widthRadius)); // Left Whisker
+
+                // Also check Knee level for low obstacles if jumping is involved, 
+                // but for now chest level prevents walking into walls.
+                
+                // Increase check distance slightly to stop before visual clipping
+                // 0.8 was too close. 1.0 or 1.2 is safer for this scale.
+                const checkDist = 1.1; 
+
+                for (let o of origins) {
+                    raycaster.set(o, worldMoveDir);
+                    const wallIntersects = raycaster.intersectObject(terrain, true);
+                    if (wallIntersects.length > 0 && wallIntersects[0].distance < checkDist) {
+                        blocked = true;
+                        break;
+                    }
                 }
 
                 if (!blocked) {
@@ -721,8 +806,9 @@ function animate() {
 
         // Raycast AFTER movement to ensure we snap to the correct ground height for the NEW position
         // FIX: Raycast from just above player (e.g. +2.0) instead of sky (200)
+        // Lowered to 0.8
         const rayOrigin = player.position.clone();
-        rayOrigin.y += 2.0; 
+        rayOrigin.y += 0.8; 
         
         raycaster.set(rayOrigin, downVector);
         
@@ -749,7 +835,8 @@ function animate() {
                 player.position.z = oldPosition.z;
                 
                 // Re-raycast at reverted position to ensure we land on valid ground
-                raycaster.set(new THREE.Vector3(player.position.x, 200, player.position.z), downVector);
+                // Lowered from 200 to oldPosition + 0.8
+                raycaster.set(new THREE.Vector3(player.position.x, oldPosition.y + 0.8, player.position.z), downVector);
                 const wallIntersects = raycaster.intersectObject(terrain, true);
                 if (wallIntersects.length > 0) {
                      const validGround = wallIntersects[0].point.y;
@@ -809,6 +896,25 @@ function createRock(x, z, radius) {
     mesh.receiveShadow = true;
     scene.add( mesh );
     rocks.push({ x: x, z: z, radius: radius * 1.5, mesh: mesh });
+}
+
+function createFoamMarker(x, z, radius) {
+    // Convert World Coordinates (Input) to Water-Relative Coordinates
+    // This ensures that even if water is moved, the logic remains consistent
+    const relX = x - riverParams.waterX;
+    const relZ = z - riverParams.waterZ;
+
+    // Debug Visual (Red Wireframe Sphere)
+    const geometry = new THREE.SphereGeometry(radius, 8, 8);
+    const material = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true });
+    const mesh = new THREE.Mesh(geometry, material);
+    
+    // Position mesh in World Space initially
+    mesh.position.set(x, riverParams.waterHeight, z);
+    scene.add(mesh);
+    
+    // Store Relative coordinates in rocks array
+    rocks.push({ x: relX, z: relZ, radius: radius, mesh: mesh });
 }
 
 function updateRiverHeight() {
@@ -988,10 +1094,29 @@ function createFoamSystem() {
     const lives = new Float32Array(count);
     const offsets = new Float32Array(count);
     
+    // Pre-calculate limits for seeding
+    const currentWidth = riverParams.width;
+    const currentLength = riverParams.length;
+    const edgeLimit = currentWidth * 0.5;
+    const lengthLimit = currentLength * 0.5;
+
     for(let i=0; i<count; i++) {
-        positions[i*3] = 0;
-        positions[i*3+1] = -100; // Highlight: start hidden
-        positions[i*3+2] = 0;
+        // Pre-seed positions so foam appears immediately
+        if(Math.random() < 0.6 && rocks.length > 0) {
+            const rock = rocks[Math.floor(Math.random() * rocks.length)];
+            const r = rock.radius + (Math.random() * 0.5);
+            const a = Math.random() * Math.PI * 2;
+            positions[i*3] = rock.x + Math.cos(a) * r; 
+            positions[i*3+2] = rock.z + Math.sin(a) * r;
+        } else {
+            const side = Math.random() > 0.5 ? 1 : -1;
+            const edgeX = (edgeLimit - 0.2) * side; 
+            const edgeZ = (Math.random() * currentLength) - lengthLimit;
+            positions[i*3] = edgeX + (Math.random() * 0.5 * -side); 
+            positions[i*3+2] = edgeZ;
+        }
+        positions[i*3+1] = 0.05; // Initial relative height
+
         lives[i] = Math.random(); 
         offsets[i] = Math.random() * 100;
     }
@@ -1017,6 +1142,8 @@ function createFoamSystem() {
     });
 
     foamSystem = new THREE.Points(geometry, material);
+    // Ensure position matches current water params
+    foamSystem.position.set(riverParams.waterX, riverParams.waterHeight, riverParams.waterZ);
     scene.add(foamSystem);
 }
 
@@ -1085,18 +1212,41 @@ function updateWater(time) {
             if(lives[i] <= 0) {
                 // Respawn
                 lives[i] = 1.0;
-                if(Math.random() < 0.6 && rocks.length > 0) {
-                    const rock = rocks[Math.floor(Math.random() * rocks.length)];
-                    const r = rock.radius + (Math.random() * 0.5);
-                    const a = Math.random() * Math.PI * 2;
-                    positions[i*3] = rock.x + Math.cos(a) * r; 
-                    positions[i*3+2] = rock.z + Math.sin(a) * r;
-                } else {
-                    const side = Math.random() > 0.5 ? 1 : -1;
-                    const edgeX = (edgeLimit - 0.2) * side; 
-                    const edgeZ = (Math.random() * currentLength) - lengthLimit;
-                    positions[i*3] = edgeX + (Math.random() * 0.5 * -side); 
-                    positions[i*3+2] = edgeZ;
+                
+                let spawnedOnPlayer = false;
+                if (player) {
+                    const pRelX = player.position.x - riverParams.waterX;
+                    const pRelZ = player.position.z - riverParams.waterZ;
+                    
+                    // Check if player is strictly within water bounds
+                    if (Math.abs(pRelX) < edgeLimit && Math.abs(pRelZ) < lengthLimit) {
+                        // Check height (feet roughly around water level)
+                        if (Math.abs(player.position.y - riverParams.waterHeight) < 2.5) {
+                            if (Math.random() < 0.08) { // 8% chance (Reduced to avoid being too much)
+                                spawnedOnPlayer = true;
+                                const r = 0.3 + Math.random() * 0.5; // Tighter radius
+                                const a = Math.random() * Math.PI * 2;
+                                positions[i*3] = pRelX + Math.cos(a) * r;
+                                positions[i*3+2] = pRelZ + Math.sin(a) * r;
+                            }
+                        }
+                    }
+                }
+
+                if (!spawnedOnPlayer) {
+                    if(Math.random() < 0.6 && rocks.length > 0) {
+                        const rock = rocks[Math.floor(Math.random() * rocks.length)];
+                        const r = rock.radius + (Math.random() * 0.5);
+                        const a = Math.random() * Math.PI * 2;
+                        positions[i*3] = rock.x + Math.cos(a) * r; 
+                        positions[i*3+2] = rock.z + Math.sin(a) * r;
+                    } else {
+                        const side = Math.random() > 0.5 ? 1 : -1;
+                        const edgeX = (edgeLimit - 0.2) * side; 
+                        const edgeZ = (Math.random() * currentLength) - lengthLimit;
+                        positions[i*3] = edgeX + (Math.random() * 0.5 * -side); 
+                        positions[i*3+2] = edgeZ;
+                    }
                 }
             } else {
                 // Move
