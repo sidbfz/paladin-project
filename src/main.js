@@ -4,12 +4,72 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { Sky } from 'three/addons/objects/Sky.js';
+import { Water } from 'three/addons/objects/Water.js';
+import GUI from 'lil-gui';
 
 // Post-Processing Imports
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+// --- WATER & RIVER GLOBALS ---
+let water, waterfall, waterfall2, foamSystem, foamUniforms, mistSystem, mistUniforms;
+let rocks = [];
+const riverParams = {
+    speed: 0.7,
+    waveHeight: 0.33,
+    flowAngle: 0,
+    foamAmount: 8910, 
+    foamSize: 0.4,
+    bloomStrength: 0,
+    waterHeight: 30.5,
+    waterX: 2,
+    waterZ: -1.2,
+    width: 11.5,
+    length: 100,
+    waterfallDrop: 30
+};
+
+const foamVertexShader = `
+    attribute float life;
+    attribute float offset;
+    uniform float time;
+    uniform float size;
+    varying float vLife;
+    varying float vOffset;
+
+    void main() {
+        vLife = life;
+        vOffset = offset;
+        vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+        gl_Position = projectionMatrix * mvPosition;
+
+        // Base Size * Pulse * Life Fade * Perspective Scale
+        float pulse = 1.0 + 0.3 * sin(time * 10.0 + offset);
+        gl_PointSize = size * pulse * vLife * ( 300.0 / -mvPosition.z );
+    }
+`;
+
+const foamFragmentShader = `
+    uniform vec3 color;
+    uniform sampler2D map;
+    uniform float time;
+    varying float vLife;
+    varying float vOffset;
+
+    void main() {
+        vec4 texColor = texture2D( map, gl_PointCoord );
+        if (texColor.a < 0.01) discard;
+
+        // Flicker
+        float flicker = 0.7 + 0.3 * sin(time * 20.0 + vOffset * 10.0);
+        float alpha = texColor.a * vLife * flicker;
+
+        gl_FragColor = vec4( color, alpha );
+    }
+`;
 
 // Setup
 const scene = new THREE.Scene();
@@ -33,6 +93,13 @@ const composer = new EffectComposer(renderer);
 
 const renderPass = new RenderPass(scene, camera);
 composer.addPass(renderPass);
+
+// BLOOM (From water.html)
+const bloomPass = new UnrealBloomPass( new THREE.Vector2( window.innerWidth, window.innerHeight ), 1.5, 0.4, 0.85 );
+bloomPass.threshold = 0.2;
+bloomPass.strength = riverParams.bloomStrength;
+bloomPass.radius = 0.5;
+composer.addPass( bloomPass );
 
 // SSAO Removed for cleaner look
 // const ssaoPass = new SSAOPass(scene, camera, window.innerWidth, window.innerHeight);
@@ -80,6 +147,8 @@ const sky = new Sky();
 sky.scale.setScalar(450000);
 scene.add(sky);
 
+// Removed GridHelper
+
 const sun = new THREE.Vector3();
 
 const effectController = {
@@ -114,6 +183,63 @@ dirLight.position.copy(sun).multiplyScalar(50); // Move light far out
 const pmremGenerator = new THREE.PMREMGenerator(renderer);
 const renderTarget = pmremGenerator.fromScene(scene);
 scene.environment = renderTarget.texture;
+
+// --- WATER SETUP ---
+const waterGeometry = new THREE.PlaneGeometry( 9, 60, 60, 100 ); // Hardcoded base size to match scaling logic
+water = new Water(
+    waterGeometry,
+    {
+        textureWidth: 512,
+        textureHeight: 512,
+        waterNormals: new THREE.TextureLoader().load( 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/waternormals.jpg', function ( texture ) {
+            texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        } ),
+        sunDirection: new THREE.Vector3(),
+        sunColor: 0xffffff,
+        waterColor: 0x003344,
+        distortionScale: 3.7,
+        fog: scene.fog !== undefined
+    }
+);
+water.rotation.x = - Math.PI / 2;
+water.position.y = riverParams.waterHeight;
+scene.add( water );
+water.material.uniforms[ 'sunDirection' ].value.copy( sun ).normalize();
+updateWaterScale(); // Apply initial scale based on riverParams
+
+// Rocks
+createRock(0, 0, 1.2);
+createRock(-2.0, 5, 0.9);
+createRock(2.5, -6, 1.0);
+
+// Foam
+createFoamSystem();
+
+// Waterfall and Mist
+createWaterfall();
+createMistSystem();
+
+// --- GUI ---
+const gui = new GUI();
+gui.add( riverParams, 'speed', 0, 5 ).name('Flow Speed');
+gui.add( riverParams, 'waveHeight', 0, 1 ).name('Wave Height');
+gui.add( riverParams, 'flowAngle', -180, 180 ).name('Direction');
+
+const folderFoam = gui.addFolder('Foam Settings');
+folderFoam.add( riverParams, 'foamAmount', 0, 15000 ).name('Count').onChange( updateFoamCount );
+folderFoam.add( riverParams, 'foamSize', 0.01, 2.0 ).name('Particle Size').onChange( (v) => {
+    if(foamUniforms) foamUniforms.size.value = v;
+});
+folderFoam.open();
+
+gui.add( riverParams, 'bloomStrength', 0, 2 ).name('Bloom Glow').onChange( (v) => bloomPass.strength = v );
+gui.add( riverParams, 'waterHeight', -20, 50 ).name('Water Y Level').onChange( updateRiverHeight );
+gui.add( riverParams, 'waterX', -100, 100 ).name('Water X Pos').onChange( updateRiverHeight );
+gui.add( riverParams, 'waterZ', -200, 200 ).name('Water Z Pos').onChange( updateRiverHeight );
+gui.add( riverParams, 'width', 1, 300 ).name('Width').onChange( updateWaterScale );
+gui.add( riverParams, 'length', 1, 1000 ).name('Length').onChange( updateWaterScale );
+gui.add( riverParams, 'waterfallDrop', 5, 200 ).name('Waterfall H').onChange( updateRiverHeight ); // Update height triggers position recalc
+
 
 // Create Simple Low Poly Clouds
 function addClouds() {
@@ -233,12 +359,18 @@ gltfLoader.load('/models/medieval_fantasy_book.glb', (gltf) => {
     // Scale up if it's too small (assuming we want a walkable area of ~20 units)
     const maxDim = Math.max(size.x, size.y, size.z);
     
-    // 1. Determine Scale
+    // --- CHANGE HERE ---
+    // Target Size: How big do you want the land to be?
+    // If the character is 1.8 units tall, a decent small "level" is 100-200 units.
+    const targetSize = 150;
+
     let scaleFactor = 1;
-    if (maxDim < 20) {
-        scaleFactor = 20 / maxDim;
-        model.scale.set(scaleFactor, scaleFactor, scaleFactor);
-    }
+    // We remove the "if (maxDim < 20)" check and just enforce the target size
+    // This ensures the book is ALWAYS 150 units wide, regardless of its original size.
+    scaleFactor = targetSize / maxDim;
+    
+    model.scale.set(scaleFactor, scaleFactor, scaleFactor);
+    // -------------------
     
     // 2. Update Box AFTER scaling to get correct world dimensions
     model.updateMatrixWorld(true);
@@ -257,6 +389,8 @@ gltfLoader.load('/models/medieval_fantasy_book.glb', (gltf) => {
             child.castShadow = true;
         }
     });
+
+    // Removed Debug Helpers
     
     scene.add(model);
     terrain = model;
@@ -278,7 +412,8 @@ gltfLoader.load('/models/medieval_fantasy_book.glb', (gltf) => {
 fbxLoader.load('/models/Pro Sword and Shield Pack (1)/Paladin WProp J Nordstrom.fbx', (character) => {
     
     // FBX usually defaults to centimeters, so scale might need adjustment (0.01).
-    character.scale.set(0.01, 0.01, 0.01); 
+    // Increased from 0.01 to 0.015 for slightly larger character
+    character.scale.set(0.013, 0.013, 0.013); 
     
     // Spawn high up to ensure Raycast snaps down correctly (avoids getting stuck below ground)
     character.position.set(0, 50, 0); // Explicitly set X, Y, Z to be sure 
@@ -403,6 +538,9 @@ const downVector = new THREE.Vector3(0, -1, 0);
 function animate() {
     requestAnimationFrame(animate);
     
+    // Update Water System (from water.html)
+    updateWater(performance.now() * 0.001);
+
     const delta = clock.getDelta();
     if (mixer) mixer.update(delta);
     if (envMixer) envMixer.update(delta);
@@ -505,7 +643,7 @@ function animate() {
                 // But you asked for "Rotate character like GTA", which means S turns you around.
                 
                 // Uniform speed for now (or sprint)
-                moveSpeed = isRunning ? 6.0 : 2.0; 
+                moveSpeed = isRunning ? 10.0 : 4.0;
                 targetActionName = isRunning ? 'run' : 'walk';
            }
            
@@ -657,3 +795,371 @@ function animate() {
     composer.render(); // Use Composer for Post-Processing
 }
 animate();
+
+// --- WATER IMPLEMENTATION FUNCTIONS ---
+
+function createRock(x, z, radius) {
+    const geometry = new THREE.IcosahedronGeometry( radius, 1 );
+    const material = new THREE.MeshStandardMaterial( { color: 0x111111, roughness: 0.6, flatShading: true } );
+    const mesh = new THREE.Mesh( geometry, material );
+    mesh.position.set( x, -0.8, z );
+    mesh.rotation.set(Math.random(), Math.random(), Math.random());
+    mesh.scale.set(1.3, 0.7, 1.1);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    scene.add( mesh );
+    rocks.push({ x: x, z: z, radius: radius * 1.5, mesh: mesh });
+}
+
+function updateRiverHeight() {
+    if (water) {
+        water.position.y = riverParams.waterHeight;
+        water.position.x = riverParams.waterX;
+        water.position.z = riverParams.waterZ;
+    }
+    if (foamSystem) {
+        foamSystem.position.y = riverParams.waterHeight;
+        foamSystem.position.x = riverParams.waterX;
+        foamSystem.position.z = riverParams.waterZ;
+    }
+    if (waterfall) {
+        // Position waterfall at the "downstream" end (Z- direction from center)
+        // Length flows along Z. So edge is at waterZ - length/2
+        waterfall.position.x = riverParams.waterX;
+        waterfall.position.y = riverParams.waterHeight - (riverParams.waterfallDrop / 2);
+        waterfall.position.z = riverParams.waterZ + (riverParams.length / 2); 
+    }
+    if (waterfall2) {
+        waterfall2.position.x = riverParams.waterX;
+        waterfall2.position.y = riverParams.waterHeight - (riverParams.waterfallDrop / 2);
+        waterfall2.position.z = riverParams.waterZ - (riverParams.length / 2); 
+    }
+    if (mistSystem) {
+        mistSystem.position.x = riverParams.waterX;
+        mistSystem.position.y = riverParams.waterHeight;
+        mistSystem.position.z = riverParams.waterZ; // Center it
+    }
+    rocks.forEach(rock => {
+        if (rock.mesh) {
+             rock.mesh.position.y = riverParams.waterHeight - 0.8;
+             rock.mesh.position.x = riverParams.waterX + rock.x;
+             rock.mesh.position.z = riverParams.waterZ + rock.z;
+        }
+    });
+}
+
+function updateWaterScale() {
+   if(water) {
+       // Scale relative to initial geometry dimensions (Width: 9, Length: 60)
+       // This ensures visual size matches the slider value
+       water.scale.set(
+           riverParams.width / 9,  
+           riverParams.length / 60, 
+           1
+       );
+   }
+   if (waterfall) {
+       // Scale Width to match river
+       // Scale Height (Y) to match drop parameter (relative to initial 30)
+       waterfall.scale.set(
+           riverParams.width / 9,
+           riverParams.waterfallDrop / 30,
+           1
+       );
+   }
+   if (waterfall2) {
+       waterfall2.scale.set(
+           riverParams.width / 9,
+           riverParams.waterfallDrop / 30,
+           1
+       );
+   }
+   // Also need to move waterfall/mist because "Length" changed the edge position
+   updateRiverHeight();
+}
+
+function createWaterfall() {
+    // Initial height matches waterfalldrop param (30)
+    const geometry = new THREE.PlaneGeometry(9, 30, 10, 10);
+    waterfall = new Water(geometry, {
+        textureWidth: 512,
+        textureHeight: 512,
+        waterNormals: new THREE.TextureLoader().load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/waternormals.jpg', function ( texture ) {
+            texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        }),
+        sunDirection: new THREE.Vector3(),
+        sunColor: 0xffffff,
+        waterColor: 0x004455, // Slightly different color
+        distortionScale: 3.7,
+        fog: scene.fog !== undefined
+    });
+    
+    // Vertical Plane
+    // Default is XY. We want it facing Z (since river flows to Z+ or Z-).
+    // Let's face it towards +Z.
+    // No rotation needed for XY plane to be vertical.
+    
+    scene.add(waterfall);
+    
+    // Create second waterfall for other end
+    const geo2 = geometry.clone();
+    waterfall2 = new Water(geo2, {
+        textureWidth: 512,
+        textureHeight: 512,
+        waterNormals: new THREE.TextureLoader().load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/waternormals.jpg', function ( texture ) {
+            texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        }),
+        sunDirection: new THREE.Vector3(),
+        sunColor: 0xffffff,
+        waterColor: 0x004455,
+        distortionScale: 3.7,
+        fog: scene.fog !== undefined
+    });
+    waterfall2.rotation.y = Math.PI; // Face the other way
+    scene.add(waterfall2);
+
+    updateRiverHeight(); // Position it
+    updateWaterScale();  // Scale it
+}
+
+function createMistSystem() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 32; canvas.height = 32;
+    const context = canvas.getContext('2d');
+    const grad = context.createRadialGradient(16,16,0, 16,16,16);
+    grad.addColorStop(0, 'rgba(255,255,255,0.8)'); // More opaque for "cloud" look
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    context.fillStyle = grad;
+    context.fillRect(0,0,32,32);
+    const texture = new THREE.CanvasTexture(canvas);
+
+    const count = 5000; // More particles better density
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const lives = new Float32Array(count);
+    const offsets = new Float32Array(count);
+
+    for(let i=0; i<count; i++) {
+        positions[i*3] = 0; positions[i*3+1] = -500; positions[i*3+2] = 0; // Hide initially
+        lives[i] = Math.random();
+        offsets[i] = Math.random() * 100;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('life', new THREE.BufferAttribute(lives, 1));
+    geometry.setAttribute('offset', new THREE.BufferAttribute(offsets, 1));
+
+    mistUniforms = {
+        time: { value: 0 },
+        size: { value: 6.0 }, // Much Huge particles to cover edge
+        color: { value: new THREE.Color(0xffffff) },
+        map: { value: texture }
+    };
+
+    const material = new THREE.ShaderMaterial({
+        uniforms: mistUniforms,
+        vertexShader: foamVertexShader, // Reuse foam shader
+        fragmentShader: foamFragmentShader,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.NormalBlending
+    });
+
+    mistSystem = new THREE.Points(geometry, material);
+    scene.add(mistSystem);
+    updateRiverHeight();
+}
+
+function createFoamSystem() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 32; canvas.height = 32;
+    const context = canvas.getContext('2d');
+    const grad = context.createRadialGradient(16,16,0, 16,16,16);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    context.fillStyle = grad;
+    context.fillRect(0,0,32,32);
+    const texture = new THREE.CanvasTexture(canvas);
+
+    const geometry = new THREE.BufferGeometry();
+    const count = riverParams.foamAmount;
+    
+    const positions = new Float32Array(count * 3);
+    const lives = new Float32Array(count);
+    const offsets = new Float32Array(count);
+    
+    for(let i=0; i<count; i++) {
+        positions[i*3] = 0;
+        positions[i*3+1] = -100; // Highlight: start hidden
+        positions[i*3+2] = 0;
+        lives[i] = Math.random(); 
+        offsets[i] = Math.random() * 100;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('life', new THREE.BufferAttribute(lives, 1));
+    geometry.setAttribute('offset', new THREE.BufferAttribute(offsets, 1));
+
+    foamUniforms = {
+        time: { value: 0 },
+        size: { value: riverParams.foamSize }, // Use current param value
+        color: { value: new THREE.Color( 0xffffff ) },
+        map: { value: texture }
+    };
+
+    const material = new THREE.ShaderMaterial({
+        uniforms: foamUniforms,
+        vertexShader: foamVertexShader,
+        fragmentShader: foamFragmentShader,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.NormalBlending
+    });
+
+    foamSystem = new THREE.Points(geometry, material);
+    scene.add(foamSystem);
+}
+
+function updateFoamCount() {
+    scene.remove(foamSystem);
+    createFoamSystem();
+}
+
+function getWaveHeight(x, z, time, dirX, dirY) {
+    const flowDist  = (x * dirX) + (z * dirY);
+    const crossDist = (x * dirY) - (z * dirX);
+    
+    let h = 0;
+    h += Math.sin( flowDist * 0.8 + time * riverParams.speed ) * 0.5;
+    h += Math.sin( flowDist * 1.5 + crossDist * 1.2 + time * riverParams.speed * 1.2 ) * 0.3;
+    h += Math.sin( flowDist * 3.0 + time * riverParams.speed * 2.0 ) * 0.1;
+    return h * riverParams.waveHeight;
+}
+
+function updateWater(time) {
+    const rad = THREE.MathUtils.degToRad( riverParams.flowAngle );
+    const dirX = Math.sin( rad );
+    const dirY = Math.cos( rad );
+
+    // 1. UPDATE WATER
+    if (water) {
+        const position = water.geometry.attributes.position;
+        for ( let i = 0; i < position.count; i ++ ) {
+            const x = position.getX( i );
+            const y = position.getY( i ); 
+            let h = getWaveHeight(x, y, time, dirX, dirY);
+            // Rock push
+            for(let r=0; r<rocks.length; r++) {
+                const dx = x - rocks[r].x;
+                const dy = y - rocks[r].z;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                if( dist < rocks[r].radius * 2.5 ) {
+                    h += (1.0 - (dist / (rocks[r].radius * 2.5))) * 0.6;
+                }
+            }
+            position.setZ( i, h );
+        }
+        water.geometry.attributes.position.needsUpdate = true;
+        water.geometry.computeVertexNormals();
+        
+        water.material.uniforms[ 'time' ].value += 1.0 / 60.0;
+    }
+
+    // 2. UPDATE FOAM
+    if(foamSystem) {
+        foamSystem.material.uniforms.time.value = time;
+        const positions = foamSystem.geometry.attributes.position.array;
+        const lives = foamSystem.geometry.attributes.life.array;
+        const offsets = foamSystem.geometry.attributes.offset.array;
+        
+        // Dynamic Edge Limits based on current Width/Length
+        const currentWidth = riverParams.width;
+        const currentLength = riverParams.length;
+        const edgeLimit = currentWidth * 0.5;
+        const lengthLimit = currentLength * 0.5;
+
+        for(let i=0; i<riverParams.foamAmount; i++) {
+            
+            lives[i] -= 0.01 * riverParams.speed;
+
+            if(lives[i] <= 0) {
+                // Respawn
+                lives[i] = 1.0;
+                if(Math.random() < 0.6 && rocks.length > 0) {
+                    const rock = rocks[Math.floor(Math.random() * rocks.length)];
+                    const r = rock.radius + (Math.random() * 0.5);
+                    const a = Math.random() * Math.PI * 2;
+                    positions[i*3] = rock.x + Math.cos(a) * r; 
+                    positions[i*3+2] = rock.z + Math.sin(a) * r;
+                } else {
+                    const side = Math.random() > 0.5 ? 1 : -1;
+                    const edgeX = (edgeLimit - 0.2) * side; 
+                    const edgeZ = (Math.random() * currentLength) - lengthLimit;
+                    positions[i*3] = edgeX + (Math.random() * 0.5 * -side); 
+                    positions[i*3+2] = edgeZ;
+                }
+            } else {
+                // Move
+                positions[i*3]   += dirX * 0.08 * riverParams.speed; 
+                positions[i*3+2] += dirY * 0.08 * riverParams.speed; 
+                const noise = Math.sin(time * 5 + offsets[i]) * 0.02; 
+                positions[i*3]   += -dirY * noise; 
+                positions[i*3+2] += dirX * noise;
+            }
+            
+            // Lock to wave height
+            const waterH = getWaveHeight(positions[i*3], positions[i*3+2], time, dirX, dirY);
+            positions[i*3+1] = waterH + 0.05; 
+        }
+        
+        foamSystem.geometry.attributes.position.needsUpdate = true;
+        foamSystem.geometry.attributes.life.needsUpdate = true;
+    }
+
+    // 3. UPDATE MIST
+    if (mistSystem) {
+        mistSystem.material.uniforms.time.value = time;
+        const positions = mistSystem.geometry.attributes.position.array;
+        const lives = mistSystem.geometry.attributes.life.array;
+        const offsets = mistSystem.geometry.attributes.offset.array;
+        const count = positions.length / 3;
+        
+        const currentWidth = riverParams.width;
+        const halfLength = riverParams.length / 2;
+
+        for (let i = 0; i < count; i++) {
+            lives[i] -= 0.015; // Fade slower (linger longer)
+            
+            if (lives[i] <= 0) {
+                lives[i] = 1.0;
+                // Respawn at TOP of waterfall (BOTH ENDS)
+                const side = Math.random() > 0.5 ? 1 : -1;
+                const zPos = halfLength * side;
+
+                // Local X: Random(-width/2, width/2)
+                // Local Y: Spread around the lip (slightly up and down)
+                // Local Z: Spread thick around the edge (+/- 1.5 units)
+                positions[i*3] = (Math.random() - 0.5) * currentWidth;
+                positions[i*3+1] = (Math.random() * 1.5) - 0.5; 
+                positions[i*3+2] = zPos + ((Math.random() - 0.5) * 3.0); 
+            } else {
+                // Fall Down Slower (Float like smoke)
+                positions[i*3+1] -= 0.15; 
+                
+                // Expand outward slightly
+                positions[i*3] += (Math.random() - 0.5) * 0.05;
+            }
+        }
+        
+        mistSystem.geometry.attributes.position.needsUpdate = true;
+        mistSystem.geometry.attributes.life.needsUpdate = true;
+    }
+
+    // 4. UPDATE WATERFALL SHADER
+    if (waterfall) {
+         waterfall.material.uniforms['time'].value += 1.0 / 20.0; 
+    }
+    if (waterfall2) {
+         waterfall2.material.uniforms['time'].value += 1.0 / 20.0; 
+    }
+}
