@@ -186,6 +186,10 @@ scene.fog = new THREE.FogExp2(0xe8d8c8, 0.008); // Thicker warm fog for cinemati
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 0.5, 1.5); // Closer to the small character
 
+// --- AUDIO LISTENER ---
+const listener = new THREE.AudioListener();
+camera.add( listener );
+
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
@@ -241,6 +245,11 @@ const controls = new PointerLockControls(camera, document.body);
 
 // Click to lock
 document.addEventListener('click', (event) => {
+    // Resume Audio Context if suspended (Fixes "AudioContext was not allowed to start" warning)
+    if (listener.context.state === 'suspended') {
+        listener.context.resume();
+    }
+
     // Prevent locking if clicking on the GUI
     if (event.target.closest('.lil-gui')) return;
     controls.lock();
@@ -605,6 +614,50 @@ presetButton.addEventListener('click', (e) => {
 });
 document.body.appendChild(presetButton);
 
+// --- Audio Toggle Button ---
+let isAudioMuted = false;
+const audioButton = document.createElement('button');
+audioButton.textContent = '🔊 Sound On';
+audioButton.style.cssText = `
+    position: fixed;
+    top: 80px;
+    left: 20px;
+    padding: 12px 24px;
+    font-size: 16px;
+    font-weight: bold;
+    color: white;
+    background: linear-gradient(135deg, #2ecc71, #27ae60);
+    border: none;
+    border-radius: 25px;
+    cursor: pointer;
+    z-index: 1000;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    transition: transform 0.2s, box-shadow 0.2s;
+    font-family: 'Segoe UI', Arial, sans-serif;
+`;
+audioButton.addEventListener('mouseenter', () => {
+    audioButton.style.transform = 'scale(1.05)';
+    audioButton.style.boxShadow = '0 6px 20px rgba(0,0,0,0.4)';
+});
+audioButton.addEventListener('mouseleave', () => {
+    audioButton.style.transform = 'scale(1)';
+    audioButton.style.boxShadow = '0 4px 15px rgba(0,0,0,0.3)';
+});
+audioButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    isAudioMuted = !isAudioMuted;
+    if (isAudioMuted) {
+        listener.setMasterVolume(0);
+        audioButton.textContent = '🔇 Sound Off';
+        audioButton.style.background = 'linear-gradient(135deg, #95a5a6, #7f8c8d)';
+    } else {
+        listener.setMasterVolume(1);
+        audioButton.textContent = '🔊 Sound On';
+        audioButton.style.background = 'linear-gradient(135deg, #2ecc71, #27ae60)';
+    }
+});
+document.body.appendChild(audioButton);
+
 // --- WATER SETUP ---
 const waterGeometry = new THREE.PlaneGeometry( 9, 60, 60, 100 ); // Hardcoded base size to match scaling logic
 water = new Water(
@@ -631,6 +684,23 @@ water.material.uniforms[ 'sunDirection' ].value.copy( sun ).normalize();
 // Boost water reflectivity for cinematic shine
 water.material.uniforms[ 'size' ].value = 2.0; // Smaller ripples = sharper reflections
 updateWaterScale(); // Apply initial scale based on riverParams
+
+// --- AUDIO: RIVER ---
+const audioLoader = new THREE.AudioLoader();
+const riverSound = new THREE.PositionalAudio( listener );
+audioLoader.load( 'sounds/river-flow.mp3', function( buffer ) {
+    riverSound.setBuffer( buffer );
+    riverSound.setRefDistance( 15 ); // Distance where volume starts to drop
+    riverSound.setRolloffFactor( 1 ); // Rate of volume drop
+    riverSound.setLoop( true );
+    if (buffer.duration > 1.0) {
+        riverSound.setLoopStart(0.5);
+        riverSound.setLoopEnd(buffer.duration - 0.5); 
+    }
+    riverSound.setVolume( 0.4 );
+    riverSound.play();
+});
+scene.add( riverSound ); // Attach to scene so we can move it freely along the river path
 
 if (rocks.length > 0) {
     updateRiverHeight(); // Ensure any existing/new markers snap to water height
@@ -707,48 +777,63 @@ folderCinematic.add(cinematicParams, 'contrast', 0.8, 1.3).name('Contrast').onCh
 folderCinematic.open();
 
 
-// Create Simple Low Poly Clouds
+// Improved Clouds
 function addClouds() {
-    const geo = new THREE.DodecahedronGeometry(1, 0); // Low poly ball
+    // Smoother, fluffier geometry (Icosahedron + subdivision)
+    // or just more puffs. Let's use Icosahedron for a "softer" low poly look.
+    const geo = new THREE.IcosahedronGeometry(1, 0); 
     const mat = new THREE.MeshStandardMaterial({ 
         color: 0xffffff, 
         flatShading: true, 
-        roughness: 0.3,  // Shinier clouds
-        emissive: 0xffffee, // Slight glow
-        emissiveIntensity: 0.1
+        roughness: 0.9,  // Matte finish (like cotton)
+        metalness: 0.1,
+        emissive: 0xffffff,
+        emissiveIntensity: 0.1,
+        transparent: true,
+        opacity: 0.95
     });
     
-    // Create 20 random cloud clumps
-    for (let i = 0; i < 30; i++) {
+    // Create random cloud clumps
+    for (let i = 0; i < 40; i++) {
         const cloud = new THREE.Group();
         
-        // Each cloud is made of 3-6 puffs
-        const puffs = Math.floor(Math.random() * 4) + 3;
+        // More puffs for denser, less blocky look
+        const puffs = 7 + Math.floor(Math.random() * 6); 
         for(let j=0; j<puffs; j++) {
             const mesh = new THREE.Mesh(geo, mat);
-            // Random offset for each puff
+            // Tighter packing to merge shapes
             mesh.position.set(
-                (Math.random() - 0.5) * 6,
+                (Math.random() - 0.5) * 5,
                 (Math.random() - 0.5) * 3,
                 (Math.random() - 0.5) * 4
             );
-            // Random size for each puff
-            mesh.scale.setScalar(Math.random() * 2 + 3);
+            // Varied sizes
+            const size = 2.5 + Math.random() * 4.5;
+            mesh.scale.setScalar(size);
             
-            mesh.castShadow = false; // Clouds don't need expensive shadows on ground often
-            mesh.receiveShadow = true;
+            // Random rotation
+            mesh.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI);
+
+            mesh.castShadow = false; 
+            mesh.receiveShadow = false;
             cloud.add(mesh);
         }
         
-        // Random Position in Sky
-        // Spread wide (200x200 area) and high (30-60 height)
+        // FIX: Start much higher (70+) to avoid hitting house/land
+        // Range: 70 to 140
         cloud.position.set(
-            (Math.random() - 0.5) * 400,
-            Math.random() * 30 + 30, 
-            (Math.random() - 0.5) * 400
+            (Math.random() - 0.5) * 500,
+            70 + Math.random() * 70, 
+            (Math.random() - 0.5) * 500
         );
         
+        // Slowly float uniformly
+        cloud.userData = { speed: 0.5 + Math.random() * 1.5 };
+        
         scene.add(cloud);
+        
+        // Add to global update list if needed, or just leave static. 
+        // For now static is fine, but high up.
     }
 }
 addClouds();
@@ -770,6 +855,7 @@ const keys = {
     space: false
 };
 
+const keyStates = {};
 const actions = {
     idle: null,
     walk: null,
@@ -778,6 +864,10 @@ const actions = {
     strafe_right: null,
     jump: null
 };
+
+// Global for footsteps
+let footstepSound, jumpStartSound, jumpEndSound;
+let lastStepTime = 0;
 
 let activeAction = null;
 let verticalVelocity = 0;
@@ -792,9 +882,195 @@ document.addEventListener('keydown', (event) => {
         case 'd': keys.d = true; break;
         case 'shift': keys.shift = true; break;
         case ' ': keys.space = true; break;
-        // case 'p': placeFoamEmitter(); break;
+
+        // Coordinate Logger for Sound Placement
+        case 'l': 
+            if (player) {
+                console.log(`Pos: ${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}`);
+            }
+            break;
     }
 });
+
+// --- AUDIO: FISHERMAN SETUP ---
+const fishermanPos = new THREE.Vector3(2.70, 31.94, 38.55);
+// Adjust Y up slightly so sound comes from head/mouth level
+const fishermanSoundPos = fishermanPos.clone().add(new THREE.Vector3(0, 1.5, 0)); 
+let fishermanSound;
+let fishermanPlayed = false;
+const fishermanTriggerDist = 8.0; // Play when closer than 8 units
+const fishermanResetDist = 20.0;  // Reset only when further than 20 units
+
+// Load Fisherman Sound
+const fmLoader = new THREE.AudioLoader();
+fishermanSound = new THREE.PositionalAudio( listener );
+fmLoader.load( 'sounds/fisherman.mp3', function( buffer ) {
+    fishermanSound.setBuffer( buffer );
+    fishermanSound.setRefDistance( 5 ); 
+    fishermanSound.setRolloffFactor( 2 );
+    fishermanSound.setLoop( false ); // One shot
+    fishermanSound.setVolume( 0.7 );
+    
+    // Attach to Scene (Static location)
+    fishermanSound.position.copy(fishermanSoundPos);
+    scene.add(fishermanSound); 
+});
+
+// --- AUDIO: OXEN SETUP ---
+const oxenPos = new THREE.Vector3(36.43, 30.87, -1.83);
+let oxenSound;
+let oxenPlayed = false;
+const oxenTriggerDist = 10.0; // Slightly larger for a big animal
+const oxenResetDist = 25.0; 
+
+// Load Oxen Sound
+const oxLoader = new THREE.AudioLoader();
+oxenSound = new THREE.PositionalAudio( listener );
+oxLoader.load( 'sounds/oxen.mp3', function( buffer ) {
+    oxenSound.setBuffer( buffer );
+    oxenSound.setRefDistance( 5 ); 
+    oxenSound.setRolloffFactor( 2 );
+    oxenSound.setLoop( false ); // One shot trigger
+    oxenSound.setVolume( 0.7 );
+    
+    // Attach to Scene
+    oxenSound.position.copy(oxenPos);
+    scene.add(oxenSound); 
+
+});
+
+// --- AUDIO: COWS SETUP ---
+const cow1Pos = new THREE.Vector3(38.29, 30.43, -8.97);
+const cow2Pos = new THREE.Vector3(36.58, 30.85, -9.31);
+const cow3Pos = new THREE.Vector3(43.06, 29.01, -25.18);
+let cow1Sound, cow2Sound, cow3Sound;
+let cow1Played = false, cow2Played = false, cow3Played = false;
+const cowTriggerDist = 8.0; 
+const cowResetDist = 20.0;
+const mooLoader = new THREE.AudioLoader();
+
+// Cow 1
+cow1Sound = new THREE.PositionalAudio( listener );
+mooLoader.load( 'sounds/moo.mp3', function( buffer ) {
+    cow1Sound.setBuffer( buffer );
+    cow1Sound.setRefDistance( 5 ); 
+    cow1Sound.setRolloffFactor( 2 ); 
+    cow1Sound.setLoop( false ); 
+    cow1Sound.setVolume( 0.6 ); // Slightly quieter than oxen
+    cow1Sound.position.copy(cow1Pos);
+    scene.add(cow1Sound); 
+
+    // Periodic Background Cow 1
+    const scheduleCow1 = () => {
+        if (!cow1Sound.isPlaying) {
+             cow1Sound.setPlaybackRate(0.95 + Math.random() * 0.1); 
+             cow1Sound.play();
+        }
+        const nextDelay = (Math.random() * 30000) + 15000; 
+        setTimeout(scheduleCow1, nextDelay);
+    };
+    setTimeout(scheduleCow1, Math.random() * 20000);
+});
+
+// Cow 2
+cow2Sound = new THREE.PositionalAudio( listener );
+mooLoader.load( 'sounds/moo.mp3', function( buffer ) {
+    cow2Sound.setBuffer( buffer );
+    cow2Sound.setRefDistance( 5 ); 
+    cow2Sound.setRolloffFactor( 2 ); 
+    cow2Sound.setLoop( false ); 
+    cow2Sound.setVolume( 0.8 );
+    cow2Sound.position.copy(cow2Pos);
+    scene.add(cow2Sound); 
+
+    // Periodic Background Cow 2
+    const scheduleCow2 = () => {
+        if (!cow2Sound.isPlaying) {
+             cow2Sound.setPlaybackRate(0.95 + Math.random() * 0.1); 
+             cow2Sound.play();
+        }
+        const nextDelay = (Math.random() * 30000) + 15000; 
+        setTimeout(scheduleCow2, nextDelay);
+    };
+    setTimeout(scheduleCow2, Math.random() * 20000);
+});
+
+// Cow 3
+cow3Sound = new THREE.PositionalAudio( listener );
+mooLoader.load( 'sounds/moo.mp3', function( buffer ) {
+    cow3Sound.setBuffer( buffer );
+    cow3Sound.setRefDistance( 5 ); 
+    cow3Sound.setRolloffFactor( 2 ); 
+    cow3Sound.setLoop( false ); 
+    cow3Sound.setVolume( 0.8 );
+    cow3Sound.position.copy(cow3Pos);
+    scene.add(cow3Sound); 
+
+    // Periodic Background Cow 3
+    const scheduleCow3 = () => {
+        if (!cow3Sound.isPlaying) {
+             cow3Sound.setPlaybackRate(0.95 + Math.random() * 0.1); 
+             cow3Sound.play();
+        }
+        const nextDelay = (Math.random() * 30000) + 15000; 
+        setTimeout(scheduleCow3, nextDelay);
+    };
+    setTimeout(scheduleCow3, Math.random() * 20000);
+});
+
+// --- AUDIO: SHEEP SETUP ---
+const sheepPositions = [
+    new THREE.Vector3(37.02, 30.57, 17.99),
+    new THREE.Vector3(33.81, 31.31, 22.18),
+    new THREE.Vector3(37.06, 30.56, 17.65),
+    new THREE.Vector3(36.83, 30.62, 21.41),
+    new THREE.Vector3(38.99, 30.18, 22.75),
+    new THREE.Vector3(36.58, 30.68, 25.11),
+    new THREE.Vector3(41.56, 29.61, 22.60),
+    new THREE.Vector3(52.17, 28.40, 28.19)
+];
+
+const sheepData = [];
+// Global for Deer Proximity
+let deerData = null; 
+
+const sheepLoader = new THREE.AudioLoader();
+sheepPositions.forEach((pos) => {
+    const sound = new THREE.PositionalAudio(listener);
+    // Store in array to manage update logic
+    sheepData.push({
+        sound: sound,
+        pos: pos,
+        played: false,
+        triggerDist: 6.0,  // Sheep are smaller, trigger closer
+        resetDist: 15.0
+    });
+
+    sheepLoader.load('sounds/sheep.mp3', function(buffer) {
+        sound.setBuffer(buffer);
+        sound.setRefDistance(4);
+        sound.setRolloffFactor(2.5);
+        sound.setLoop(false);
+        sound.setVolume(0.4); // Baa is distinct but small
+        sound.position.copy(pos);
+        scene.add(sound);
+
+        // Periodic Background "Baa" (Herd Ambience)
+        const scheduleBaa = () => {
+            if (!sound.isPlaying) {
+                 sound.setPlaybackRate(0.9 + Math.random() * 0.2); // Random pitch
+                 sound.play();
+            }
+            // Schedule next baa between 10s and 40s
+            const nextDelay = (Math.random() * 30000) + 10000; 
+            setTimeout(scheduleBaa, nextDelay);
+        };
+        
+        // Start with random offset so they don't all bleat at once
+        setTimeout(scheduleBaa, Math.random() * 20000);
+    });
+});
+
 
 /*
 function placeFoamEmitter() {
@@ -874,6 +1150,100 @@ gltfLoader.load('/models/medieval_fantasy_book.glb', (gltf) => {
             child.receiveShadow = true;
             child.castShadow = true;
         }
+
+        // --- AUDIO: WINDMILL ---
+        // Moved outside isMesh check because 'Mill-wind-wheel' might be a Group, not a Mesh
+        if (child.name === 'Mill-wind-wheel') {
+            const windLoader = new THREE.AudioLoader();
+            const windSound = new THREE.PositionalAudio( listener );
+            windLoader.load( 'sounds/windmill.mp3', function( buffer ) {
+                windSound.setBuffer( buffer );
+                windSound.setRefDistance( 10 );
+                windSound.setRolloffFactor( 2 ); 
+                windSound.setLoop( true );
+                if (buffer.duration > 1.0) {
+                    windSound.setLoopStart(0.5);
+                    windSound.setLoopEnd(buffer.duration - 0.5); 
+                }
+                windSound.setVolume( 0.7 );
+                windSound.play();
+            });
+            child.add( windSound );
+        }
+
+        // --- AUDIO: WATERMILL ---
+        if (child.name === 'Mill-water-wheel') {
+            const wmLoader = new THREE.AudioLoader();
+            const wmSound = new THREE.PositionalAudio( listener );
+            wmLoader.load( 'sounds/watermill.mp3', function( buffer ) {
+                wmSound.setBuffer( buffer );
+                wmSound.setRefDistance( 8 ); // Slightly lower ref distance for water
+                wmSound.setRolloffFactor( 2.5 ); 
+                wmSound.setLoop( true );
+                if (buffer.duration > 1.0) {
+                    wmSound.setLoopStart(0.5);
+                    wmSound.setLoopEnd(buffer.duration - 0.5); 
+                }
+                wmSound.setVolume( 0.5 );
+                wmSound.play();
+            });
+            child.add( wmSound );
+        }
+
+        // --- AUDIO: DEER (Proximity + Random) ---
+        if (child.name === 'deers') {
+            const deerLoader = new THREE.AudioLoader();
+            const deerSound = new THREE.PositionalAudio( listener );
+            
+            // Expose for animate loop
+            deerData = {
+                sound: deerSound,
+                mesh: child, // Attach to child directly
+                played: false
+            };
+
+            deerLoader.load( 'sounds/deer.mp3', function( buffer ) {
+                deerSound.setBuffer( buffer );
+                deerSound.setRefDistance( 12 );
+                deerSound.setRolloffFactor( 2.0 );
+                deerSound.setLoop( false ); 
+                deerSound.setVolume( 0.6 );
+                
+                // Periodic Background "Call"
+                const scheduleDeer = () => {
+                    if (!deerSound.isPlaying) {
+                        deerSound.play();
+                    }
+                    // Deer calls are sparse (15-30s)
+                    const nextDelay = (Math.random() * 15000) + 15000;
+                    setTimeout(scheduleDeer, nextDelay);
+                };
+                setTimeout(scheduleDeer, Math.random() * 10000);
+            });
+            child.add( deerSound );
+        }
+
+        // --- AUDIO: FLAGS ---
+        if (child.name === 'flag' || child.name === 'flag-second') {
+            const flagLoader = new THREE.AudioLoader();
+            const flagSound = new THREE.PositionalAudio( listener );
+            flagLoader.load( 'sounds/flag.mp3', function( buffer ) {
+                flagSound.setBuffer( buffer );
+                flagSound.setRefDistance( 5 ); 
+                flagSound.setRolloffFactor( 2 ); 
+                flagSound.setLoop( true ); // Loop continuously
+                if (buffer.duration > 1.0) {
+                    flagSound.setLoopStart(0.5);
+                    flagSound.setLoopEnd(buffer.duration - 0.5); 
+                }
+                flagSound.setVolume( 0.6 ); 
+                // Random start time to avoid phasing if identical flags
+                setTimeout(() => {
+                    if(!flagSound.isPlaying) flagSound.play();
+                }, Math.random() * 2000);
+            });
+            child.add( flagSound );
+        }
     });
 
     // Removed Debug Helpers
@@ -913,6 +1283,43 @@ fbxLoader.load('/models/Pro Sword and Shield Pack (1)/Paladin WProp J Nordstrom.
 
     scene.add(character);
     player = character;
+
+    // --- AUDIO: FOOTSTEPS ---
+    const stepLoader = new THREE.AudioLoader();
+    footstepSound = new THREE.PositionalAudio( listener );
+    stepLoader.load( 'sounds/footstep.mp3', function( buffer ) {
+        footstepSound.setBuffer( buffer );
+        footstepSound.setRefDistance( 2 ); 
+        footstepSound.setRolloffFactor( 2 );
+        footstepSound.setLoop( false );
+        footstepSound.setVolume( 0.4 ); // Not too loud
+        player.add( footstepSound );
+    });
+
+    // --- AUDIO: JUMP ---
+    // Start Jump
+    const jumpStartLoader = new THREE.AudioLoader();
+    jumpStartSound = new THREE.PositionalAudio( listener );
+    jumpStartLoader.load( 'sounds/jump-start.mp3', function( buffer ) {
+        jumpStartSound.setBuffer( buffer );
+        jumpStartSound.setRefDistance( 5 ); 
+        jumpStartSound.setRolloffFactor( 1 );
+        jumpStartSound.setLoop( false );
+        jumpStartSound.setVolume( 1.2 ); 
+        player.add( jumpStartSound );
+    });
+
+    // Land Jump
+    const jumpEndLoader = new THREE.AudioLoader();
+    jumpEndSound = new THREE.PositionalAudio( listener );
+    jumpEndLoader.load( 'sounds/jump-end.mp3', function( buffer ) {
+        jumpEndSound.setBuffer( buffer );
+        jumpEndSound.setRefDistance( 5 );
+        jumpEndSound.setRolloffFactor( 1 );
+        jumpEndSound.setLoop( false );
+        jumpEndSound.setVolume( 1.2 ); 
+        player.add( jumpEndSound );
+    });
 
     mixer = new THREE.AnimationMixer(character);
 
@@ -1024,11 +1431,149 @@ const downVector = new THREE.Vector3(0, -1, 0);
 function animate() {
     requestAnimationFrame(animate);
     
+    // --- FISHERMAN AUDIO LOGIC ---
+    if (player && fishermanSound && fishermanSound.buffer) { // Ensure player & sound loaded
+        const dist = player.position.distanceTo(fishermanPos);
+        
+        if (!fishermanPlayed && dist < fishermanTriggerDist) {
+            // Player entered zone -> Play Sound
+            if (!fishermanSound.isPlaying) {
+                fishermanSound.play();
+            }
+            fishermanPlayed = true; 
+        } else if (fishermanPlayed && dist > fishermanResetDist) {
+            // Player left zone -> Reset Trigger
+            fishermanPlayed = false;
+        }
+    }
+
+    // --- OXEN AUDIO LOGIC ---
+    if (player && oxenSound && oxenSound.buffer) { 
+        const dist = player.position.distanceTo(oxenPos);
+        
+        if (!oxenPlayed && dist < oxenTriggerDist) {
+            // Player entered zone -> Play Sound
+            if (!oxenSound.isPlaying) {
+                oxenSound.play();
+            }
+            oxenPlayed = true; 
+        } else if (oxenPlayed && dist > oxenResetDist) {
+            // Player left zone -> Reset Trigger
+            oxenPlayed = false;
+        }
+    }
+
+    // --- COW AUDIO LOGIC ---
+    // Cow 1
+    if (player && cow1Sound && cow1Sound.buffer) { 
+        const dist = player.position.distanceTo(cow1Pos);
+        if (!cow1Played && dist < cowTriggerDist) {
+            if (!cow1Sound.isPlaying) cow1Sound.play();
+            cow1Played = true; 
+        } else if (cow1Played && dist > cowResetDist) {
+            cow1Played = false;
+        }
+    }
+    // Cow 2
+    if (player && cow2Sound && cow2Sound.buffer) { 
+        const dist = player.position.distanceTo(cow2Pos);
+        if (!cow2Played && dist < cowTriggerDist) {
+            if (!cow2Sound.isPlaying) cow2Sound.play();
+            cow2Played = true; 
+        } else if (cow2Played && dist > cowResetDist) {
+            cow2Played = false;
+        }
+    }
+    // Cow 3
+    if (player && cow3Sound && cow3Sound.buffer) { 
+        const dist = player.position.distanceTo(cow3Pos);
+        if (!cow3Played && dist < cowTriggerDist) {
+            if (!cow3Sound.isPlaying) cow3Sound.play();
+            cow3Played = true; 
+        } else if (cow3Played && dist > cowResetDist) {
+            cow3Played = false;
+        }
+    }
+
+    // --- SHEEP AUDIO LOGIC ---
+    if (player && sheepData.length > 0) {
+        sheepData.forEach(sheep => {
+            if (sheep.sound && sheep.sound.buffer) {
+                const dist = player.position.distanceTo(sheep.pos);
+                if (!sheep.played && dist < sheep.triggerDist) {
+                    // Randomize pitch slightly for variety? Optional but nice.
+                    if (!sheep.sound.isPlaying) {
+                        // random playback rate 0.9 to 1.1 = different baa pitch
+                        sheep.sound.setPlaybackRate(0.9 + Math.random() * 0.2);
+                        sheep.sound.play();
+                    }
+                    sheep.played = true;
+                } else if (sheep.played && dist > sheep.resetDist) {
+                    sheep.played = false;
+                }
+            }
+        });
+    }
+
+    // --- DEER AUDIO LOGIC ---
+    if (player && deerData && deerData.sound && deerData.sound.buffer) {
+        // Deer is inside a scaled group, so we need World Position
+        const deerWorldPos = new THREE.Vector3();
+        deerData.mesh.getWorldPosition(deerWorldPos);
+
+        const dist = player.position.distanceTo(deerWorldPos);
+        const deerTriggerDist = 12.0; 
+        const deerResetDist = 30.0;
+
+        if (!deerData.played && dist < deerTriggerDist) {
+             if (!deerData.sound.isPlaying) {
+                 deerData.sound.play();
+             }
+             deerData.played = true;
+        } else if (deerData.played && dist > deerResetDist) {
+             deerData.played = false;
+        }
+    }
+
+    // --- FOOTSTEP LOGIC ---
+    // Check if moving on ground
+    if (player && footstepSound && footstepSound.buffer && isGrounded) {
+       const isMoving = keys.w || keys.a || keys.s || keys.d;
+       if (isMoving) {
+           const isRunning = keys.shift;
+           const now = performance.now();
+           // Walk: 500ms, Run: 300ms
+           const stepInterval = isRunning ? 300 : 500; 
+           
+           if (now - lastStepTime > stepInterval) {
+               if (footstepSound.isPlaying) footstepSound.stop();
+               // Slight pitch variation (0.9 - 1.1) to avoid robotic repetition
+               footstepSound.setPlaybackRate(0.9 + Math.random() * 0.2);
+               footstepSound.play();
+               lastStepTime = now;
+           }
+       }
+    }
+
     // Update Cinematic Shader Time (for film grain)
     if (cinematicPass) {
         cinematicPass.uniforms['time'].value = performance.now() * 0.001;
     }
     
+    // Update River Sound Position (Follow Player along River Axis)
+    if (riverSound && player) {
+        // Clamp Z to the river's extent
+        const halfLength = riverParams.length / 2;
+        const minZ = riverParams.waterZ - halfLength;
+        const maxZ = riverParams.waterZ + halfLength;
+        
+        // Find closest point on river centerline to player
+        let targetZ = player.position.z;
+        targetZ = Math.max(minZ, Math.min(maxZ, targetZ));
+        
+        riverSound.position.set(riverParams.waterX, riverParams.waterHeight, targetZ);
+    }
+
     // Update Stars Twinkle
     if (stars && stars.visible) {
         stars.material.uniforms.time.value = performance.now() * 0.001;
@@ -1114,6 +1659,19 @@ function animate() {
            if (keys.space && isGrounded) {
                verticalVelocity = 10.0; // Jump force
                isGrounded = false;
+
+                // Play Jump Sound
+                if (jumpStartSound && jumpStartSound.buffer && !jumpStartSound.isPlaying) {
+                    jumpStartSound.play();
+                }
+
+                // Schedule Land Sound (Approximate time for flat ground jump)
+                setTimeout(() => {
+                    if (jumpEndSound && jumpEndSound.buffer) {
+                        if (jumpEndSound.isPlaying) jumpEndSound.stop();
+                        jumpEndSound.play();
+                    }
+                }, 700); 
                
                // Play jump anim
                if (actions.jump) {
@@ -1152,6 +1710,34 @@ function animate() {
                 // We rotated the player to face the travel direction.
                 // Now we just move "Forward" in local space.
                 const worldMoveDir = new THREE.Vector3(0, 0, 1).applyQuaternion(player.quaternion);
+                
+                // --- RIVER PHYSICS: Flow Speed Modification ---
+                if (water) {
+                    const halfWidth = riverParams.width / 2;
+                    const halfLength = riverParams.length / 2;
+                    const pRelX = player.position.x - riverParams.waterX;
+                    const pRelZ = player.position.z - riverParams.waterZ;
+                    
+                    // Check if player is within the river bounds
+                    if (Math.abs(pRelX) < halfWidth && Math.abs(pRelZ) < halfLength) {
+                        // Check Vertical: Are feet below water level? (+0.5 buffer for splashing)
+                        if (player.position.y < riverParams.waterHeight + 0.5) {
+                            
+                            // Calculate Flow Direction Vector
+                            const rad = THREE.MathUtils.degToRad(riverParams.flowAngle);
+                            const flowDir = new THREE.Vector3(Math.sin(rad), 0, Math.cos(rad));
+                            
+                            // Dot Product: 1.0 = With Flow, -1.0 = Against Flow
+                            const alignment = worldMoveDir.dot(flowDir);
+                            
+                            // Apply Speed Modifier
+                            // With Flow = Faster (+50%)
+                            // Against Flow = Slower (-50%)
+                            const flowEffect = 0.5;
+                            moveSpeed *= (1.0 + (alignment * flowEffect));
+                        }
+                    }
+                }
                 
                 // Wall Collision Check (Frontal)
                 // Check HEAD and KNEE to avoid walking into low beams or high ledges
@@ -1489,6 +2075,40 @@ function createWaterfall() {
     });
     waterfall2.rotation.y = Math.PI; // Face the other way
     scene.add(waterfall2);
+
+    // --- AUDIO: WATERFALL ---
+    // Load once, attach to both ends
+    const wfLoader = new THREE.AudioLoader();
+    wfLoader.load( 'sounds/waterfall.mp3', function( buffer ) {
+        
+        // Waterfall 1 Sound
+        const wfSound1 = new THREE.PositionalAudio( listener );
+        wfSound1.setBuffer( buffer );
+        wfSound1.setRefDistance( 5 ); // Reduced ref distance to make falloff sharper
+        wfSound1.setRolloffFactor( 5 ); // High rolloff so sound dies quickly away from source
+        wfSound1.setLoop( true );
+        if (buffer.duration > 1.0) {
+            wfSound1.setLoopStart(0.5);
+            wfSound1.setLoopEnd(buffer.duration - 0.5); 
+        }
+        wfSound1.setVolume( 0.6 );
+        wfSound1.play();
+        waterfall.add( wfSound1 ); // Attached to mesh
+
+        // Waterfall 2 Sound
+        const wfSound2 = new THREE.PositionalAudio( listener );
+        wfSound2.setBuffer( buffer );
+        wfSound2.setRefDistance( 5 );
+        wfSound2.setRolloffFactor( 5 );
+        wfSound2.setLoop( true );
+        if (buffer.duration > 1.0) {
+            wfSound2.setLoopStart(0.5);
+            wfSound2.setLoopEnd(buffer.duration - 0.5); 
+        }
+        wfSound2.setVolume( 0.6 );
+        wfSound2.play();
+        waterfall2.add( wfSound2 ); // Attached to mesh
+    });
 
     updateRiverHeight(); // Position it
     updateWaterScale();  // Scale it
