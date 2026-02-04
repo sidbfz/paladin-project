@@ -1816,7 +1816,10 @@ function animate() {
     // Update Water System (from water.html)
     updateWater(performance.now() * 0.001);
 
-    const delta = clock.getDelta();
+    let delta = clock.getDelta();
+    // Cap delta to roughly 20 FPS (0.05s) to prevent physics tunnelling during lag spikes
+    if (delta > 0.05) delta = 0.05; 
+
     if (mixer) mixer.update(delta);
     if (envMixer) envMixer.update(delta);
 
