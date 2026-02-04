@@ -852,6 +852,128 @@ const keys = {
     space: false
 };
 
+let gameActive = false;
+const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+// --- MOBILE CONTROLS LOGIC ---
+const joystickVector = { x: 0, y: 0 };
+
+function initMobileControls() {
+    const joystickZone = document.getElementById('joystick-zone');
+    const joystickKnob = document.getElementById('joystick-knob');
+    const jumpBtn = document.getElementById('mobile-jump-btn');
+
+    if (!joystickZone || !joystickKnob || !jumpBtn) return;
+
+    // Joystick Touch
+    let startX = 0, startY = 0;
+    
+    // Prevent default touch actions (scrolling)
+    document.getElementById('mobile-controls').addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+
+    joystickZone.addEventListener('touchstart', (e) => {
+        const touch = e.changedTouches[0];
+        const rect = joystickZone.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        
+        startX = centerX;
+        startY = centerY;
+        
+        updateJoystick(touch.clientX, touch.clientY, centerX, centerY);
+    }, { passive: false });
+
+    joystickZone.addEventListener('touchmove', (e) => {
+        const touch = e.changedTouches[0];
+        // Recalculate center incase of scroll/resize (though fixed pos)
+        const rect = joystickZone.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        
+        updateJoystick(touch.clientX, touch.clientY, centerX, centerY);
+    }, { passive: false });
+
+    joystickZone.addEventListener('touchend', (e) => {
+        joystickVector.x = 0;
+        joystickVector.y = 0;
+        joystickKnob.style.transform = `translate(-50%, -50%)`;
+    });
+
+    function updateJoystick(clientX, clientY, centerX, centerY) {
+        let dx = clientX - centerX;
+        let dy = clientY - centerY;
+        
+        const maxRadius = 50; // Half of base width (100px)
+        const distance = Math.min(Math.sqrt(dx*dx + dy*dy), maxRadius);
+        const angle = Math.atan2(dy, dx);
+        
+        // Clamp visual knob
+        const knobX = Math.cos(angle) * distance;
+        const knobY = Math.sin(angle) * distance;
+        joystickKnob.style.transform = `translate(calc(-50% + ${knobX}px), calc(-50% + ${knobY}px))`;
+        
+        // Normalize vector (-1 to 1)
+        joystickVector.x = knobX / maxRadius;
+        joystickVector.y = knobY / maxRadius;
+    }
+
+    // Jump Button
+    jumpBtn.addEventListener('touchstart', (e) => {
+        keys.space = true;
+        jumpBtn.style.background = 'rgba(255, 215, 0, 0.5)';
+        jumpBtn.style.transform = 'scale(0.95)';
+    });
+    
+    jumpBtn.addEventListener('touchend', (e) => {
+        keys.space = false;
+        jumpBtn.style.background = 'rgba(255, 215, 0, 0.2)';
+        jumpBtn.style.transform = 'scale(1)';
+    });
+
+    // Touch Look (Right side / Non-UI area)
+    let lastTouchX = 0;
+    let lastTouchY = 0;
+
+    document.addEventListener('touchstart', (e) => {
+        // Ignore if touching controls
+        if (e.target.closest('#joystick-zone') || e.target.closest('#action-zone')) return;
+        const touch = e.changedTouches[0];
+        lastTouchX = touch.clientX;
+        lastTouchY = touch.clientY;
+    }, { passive: false });
+
+    document.addEventListener('touchmove', (e) => {
+        // Ignore if touching controls
+        if (e.target.closest('#joystick-zone') || e.target.closest('#action-zone')) return;
+        
+        const touch = e.changedTouches[0];
+        const movementX = touch.clientX - lastTouchX;
+        const movementY = touch.clientY - lastTouchY;
+        
+        lastTouchX = touch.clientX;
+        lastTouchY = touch.clientY;
+
+        // Apply rotation to camera (mimic PointerLockControls)
+        // Yaw (Y-axis) -> Body rotation handled in Animate? 
+        // No, in animate(), we rotate the *Character* based on Camera Angle + Input.
+        // So we just need to rotate the *Camera*.
+
+        const sensitivity = 0.005;
+        // PointerLockControls usually handles this internally. We'll do it manually for touch.
+        // It rotates the "MinObject", which is the camera.
+        
+        // Update Y (Yaw) - Global axis
+        camera.rotation.y -= movementX * sensitivity;
+        
+        // Update X (Pitch) - Limit to prevent flipping
+        camera.rotation.x -= movementY * sensitivity;
+        camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+
+    }, { passive: false });
+}
+// Initialize after DOM load
+setTimeout(initMobileControls, 500);
+
 const keyStates = {};
 const actions = {
     idle: null,
@@ -1134,6 +1256,7 @@ loadingManager.onLoad = function () {
                 loadingScreen.style.opacity = '0';
                 setTimeout(() => {
                     loadingScreen.remove();
+                    gameActive = true; // Start game loop logic
                 }, 1500); 
             }
         });
@@ -1667,7 +1790,7 @@ function animate() {
         }
 
         // 2. Control Application
-        if (controls.isLocked) {
+        if (controls.isLocked || (gameActive && isMobile)) {
            // Get the direction the camera is looking (horizontal only)
            const cameraForward = new THREE.Vector3();
            camera.getWorldDirection(cameraForward);
@@ -1681,18 +1804,22 @@ function animate() {
            }
            
            // --- Movement & Animation Logic ---
-           const isMoving = keys.w || keys.a || keys.s || keys.d;
-           const isRunning = keys.shift && isMoving;
+           const isMoving = keys.w || keys.a || keys.s || keys.d || Math.abs(joystickVector.x) > 0.1 || Math.abs(joystickVector.y) > 0.1;
+           const isRunning = keys.shift && isMoving; // Mobile sprint not implemented yet (maybe double tap?)
            
-           // Determine Input Rotation Offset (WASD)
+           // Determine Input Rotation Offset (WASD + Joystick)
            // W = 0, A = 90, S = 180, D = -90
            let inputAngle = 0;
            if (isMoving) {
-               // Calculate input vector (z is forward here for atan2 calculation purposes)
-               // Forward (W) -> 1, Backward (S) -> -1
-               // Left (A) -> 1, Right (D) -> -1
-               const z = Number(keys.w) - Number(keys.s);
-               const x = Number(keys.a) - Number(keys.d);
+               // Calculate input vector
+               // Keyboard: W=1, S=-1. Joystick: Up (neg y)=1, Down (pos y)=-1
+               let z = Number(keys.w) - Number(keys.s);
+               z -= joystickVector.y; 
+
+               // Keyboard: A=1, D=-1. Joystick: Left (neg x)=1, Right (pos x)=-1
+               let x = Number(keys.a) - Number(keys.d);
+               x -= joystickVector.x;
+
                inputAngle = Math.atan2(x, z); 
            }
 

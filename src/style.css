@@ -132,3 +132,105 @@ body {
 canvas {
     display: block;
 }
+
+/* --- Mobile Controls & Landscape Warning --- */
+
+#landscape-warning {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: #000;
+    z-index: 10001;
+    color: gold;
+    font-family: 'Cinzel', serif;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    text-align: center;
+}
+
+#mobile-controls {
+    display: none; /* Hidden by default, shown via media query or JS */
+    position: fixed;
+    bottom: 20px;
+    left: 0;
+    width: 100%;
+    height: 150px;
+    z-index: 10000;
+    justify-content: space-between;
+    padding: 0 40px;
+    box-sizing: border-box;
+    pointer-events: none; /* Let clicks pass through empty areas */
+}
+
+#joystick-zone {
+    width: 150px;
+    height: 150px;
+    pointer-events: auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#joystick-base {
+    width: 100px;
+    height: 100px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    position: relative;
+    touch-action: none;
+}
+
+#joystick-knob {
+    width: 40px;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+}
+
+#action-zone {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+}
+
+#mobile-jump-btn {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: rgba(255, 215, 0, 0.2);
+    border: 2px solid rgba(255, 215, 0, 0.6);
+    color: gold;
+    font-family: 'Cinzel', serif;
+    font-weight: bold;
+    font-size: 1rem;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+}
+
+#mobile-jump-btn:active {
+    background: rgba(255, 215, 0, 0.5);
+    transform: scale(0.95);
+}
+
+/* Show Warning on Portrait Mode on Mobile */
+@media screen and (orientation: portrait) and (max-width: 900px) {
+    #landscape-warning {
+        display: flex;
+    }
+}
+
+/* Show Controls only on Touch Devices */
+@media (hover: none) and (pointer: coarse) {
+    #mobile-controls {
+        display: flex;
+    }
+}
+
