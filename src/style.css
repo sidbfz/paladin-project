@@ -228,6 +228,14 @@ canvas {
 }
 
 /* Show Controls only on Touch Devices */
+/* FIX: Some devices might report hover:hover even if they have touch. 
+   Using a class added by JS is safer, or checking multiple media queries. 
+   For now, we'll force it visible if screen is small enough (likely mobile). */
+@media (max-width: 1024px) {
+    #mobile-controls {
+        display: flex;
+    }
+}
 @media (hover: none) and (pointer: coarse) {
     #mobile-controls {
         display: flex;

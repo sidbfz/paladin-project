@@ -930,46 +930,70 @@ function initMobileControls() {
         jumpBtn.style.transform = 'scale(1)';
     });
 
-    // Touch Look (Right side / Non-UI area)
+    // Touch Look (Right side Only)
     let lastTouchX = 0;
     let lastTouchY = 0;
+    let lookTouchId = null;
 
     document.addEventListener('touchstart', (e) => {
-        // Ignore if touching controls
-        if (e.target.closest('#joystick-zone') || e.target.closest('#action-zone')) return;
-        const touch = e.changedTouches[0];
-        lastTouchX = touch.clientX;
-        lastTouchY = touch.clientY;
+        // Ignore if touching controls or Left Side of Screen
+        // Let's reserve the Left 40% of screen for Joystick/Movement
+        // And Right 60% for Camera
+        
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+            
+            // If dragging on UI, ignore
+            if (e.target.closest('#joystick-zone') || e.target.closest('#action-zone')) continue;
+            
+            // Check if touch is on the RIGHT side of the screen
+            if (touch.clientX > window.innerWidth * 0.4) {
+                if (lookTouchId === null) {
+                    lookTouchId = touch.identifier;
+                    lastTouchX = touch.clientX;
+                    lastTouchY = touch.clientY;
+                }
+            }
+        }
     }, { passive: false });
 
     document.addEventListener('touchmove', (e) => {
-        // Ignore if touching controls
-        if (e.target.closest('#joystick-zone') || e.target.closest('#action-zone')) return;
-        
-        const touch = e.changedTouches[0];
-        const movementX = touch.clientX - lastTouchX;
-        const movementY = touch.clientY - lastTouchY;
-        
-        lastTouchX = touch.clientX;
-        lastTouchY = touch.clientY;
+        if (lookTouchId === null) return;
 
-        // Apply rotation to camera (mimic PointerLockControls)
-        // Yaw (Y-axis) -> Body rotation handled in Animate? 
-        // No, in animate(), we rotate the *Character* based on Camera Angle + Input.
-        // So we just need to rotate the *Camera*.
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+            
+            if (touch.identifier === lookTouchId) {
+                const movementX = touch.clientX - lastTouchX;
+                const movementY = touch.clientY - lastTouchY;
+                
+                lastTouchX = touch.clientX;
+                lastTouchY = touch.clientY;
 
-        const sensitivity = 0.005;
-        // PointerLockControls usually handles this internally. We'll do it manually for touch.
-        // It rotates the "MinObject", which is the camera.
-        
-        // Update Y (Yaw) - Global axis
-        camera.rotation.y -= movementX * sensitivity;
-        
-        // Update X (Pitch) - Limit to prevent flipping
-        camera.rotation.x -= movementY * sensitivity;
-        camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+                // Adjust Sensitivity - Mobile needs to be faster
+                const sensitivity = 0.004;
 
+                // Rotate Camera
+                // Note: Standard PointerLockControls rotates the 'camera' object directly 
+                // but we need to implement the Euler rotation manually here.
+                
+                // Yaw (Camera Y) - Inversed
+                camera.rotation.y -= movementX * sensitivity;
+                
+                // Pitch (Camera X)
+                camera.rotation.x -= movementY * sensitivity;
+                camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+            }
+        }
     }, { passive: false });
+    
+    document.addEventListener('touchend', (e) => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+             if (e.changedTouches[i].identifier === lookTouchId) {
+                 lookTouchId = null;
+             }
+        }
+    });
 }
 // Initialize after DOM load
 setTimeout(initMobileControls, 500);
