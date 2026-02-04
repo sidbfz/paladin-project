@@ -185,6 +185,7 @@ scene.fog = new THREE.FogExp2(0xe8d8c8, 0.008); // Thicker warm fog for cinemati
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 0.5, 1.5); // Closer to the small character
+camera.rotation.order = 'YXZ'; // CRITICAL: Ensures Yaw (Y) is applied before Pitch (X) to prevent rolling/flipping
 
 // --- AUDIO LISTENER ---
 const listener = new THREE.AudioListener();
@@ -982,7 +983,9 @@ function initMobileControls() {
                 
                 // Pitch (Camera X)
                 camera.rotation.x -= movementY * sensitivity;
-                camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+                // Clamp slightly inside 90 degrees to avoid gimbal lock/flip issues
+                const maxPolar = Math.PI / 2 - 0.1; 
+                camera.rotation.x = Math.max(-maxPolar, Math.min(maxPolar, camera.rotation.x));
             }
         }
     }, { passive: false });
