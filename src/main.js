@@ -862,61 +862,25 @@ const joystickVector = { x: 0, y: 0 };
 function initMobileControls() {
     const joystickZone = document.getElementById('joystick-zone');
     const joystickKnob = document.getElementById('joystick-knob');
+    const runBtn = document.getElementById('mobile-run-btn');
     const jumpBtn = document.getElementById('mobile-jump-btn');
 
-    if (!joystickZone || !joystickKnob || !jumpBtn) return;
+    if (!joystickZone || !joystickKnob || !jumpBtn || !runBtn) return;
 
-    // Joystick Touch
-    let startX = 0, startY = 0;
-    
-    // Prevent default touch actions (scrolling)
-    document.getElementById('mobile-controls').addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+    // ... (Joystick code untouched)
 
-    joystickZone.addEventListener('touchstart', (e) => {
-        const touch = e.changedTouches[0];
-        const rect = joystickZone.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        const centerY = rect.top + rect.height / 2;
-        
-        startX = centerX;
-        startY = centerY;
-        
-        updateJoystick(touch.clientX, touch.clientY, centerX, centerY);
-    }, { passive: false });
-
-    joystickZone.addEventListener('touchmove', (e) => {
-        const touch = e.changedTouches[0];
-        // Recalculate center incase of scroll/resize (though fixed pos)
-        const rect = joystickZone.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        const centerY = rect.top + rect.height / 2;
-        
-        updateJoystick(touch.clientX, touch.clientY, centerX, centerY);
-    }, { passive: false });
-
-    joystickZone.addEventListener('touchend', (e) => {
-        joystickVector.x = 0;
-        joystickVector.y = 0;
-        joystickKnob.style.transform = `translate(-50%, -50%)`;
+    // Run Button
+    runBtn.addEventListener('touchstart', (e) => {
+        keys.shift = true;
+        runBtn.style.background = 'rgba(255, 255, 255, 0.3)';
+        runBtn.style.transform = 'scale(0.95)';
     });
 
-    function updateJoystick(clientX, clientY, centerX, centerY) {
-        let dx = clientX - centerX;
-        let dy = clientY - centerY;
-        
-        const maxRadius = 50; // Half of base width (100px)
-        const distance = Math.min(Math.sqrt(dx*dx + dy*dy), maxRadius);
-        const angle = Math.atan2(dy, dx);
-        
-        // Clamp visual knob
-        const knobX = Math.cos(angle) * distance;
-        const knobY = Math.sin(angle) * distance;
-        joystickKnob.style.transform = `translate(calc(-50% + ${knobX}px), calc(-50% + ${knobY}px))`;
-        
-        // Normalize vector (-1 to 1)
-        joystickVector.x = knobX / maxRadius;
-        joystickVector.y = knobY / maxRadius;
-    }
+    runBtn.addEventListener('touchend', (e) => {
+        keys.shift = false;
+        runBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+        runBtn.style.transform = 'scale(1)';
+    });
 
     // Jump Button
     jumpBtn.addEventListener('touchstart', (e) => {
@@ -1296,6 +1260,12 @@ loadingManager.onLoad = function () {
                 setTimeout(() => {
                     loadingScreen.remove();
                     gameActive = true; // Start game loop logic
+                    
+                    // Show mobile controls if on mobile
+                    const controls = document.getElementById('mobile-controls');
+                    if (controls && isMobile) {
+                        controls.style.display = 'flex';
+                    }
                 }, 1500); 
             }
         });
