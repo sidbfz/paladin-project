@@ -867,7 +867,57 @@ function initMobileControls() {
 
     if (!joystickZone || !joystickKnob || !jumpBtn || !runBtn) return;
 
-    // ... (Joystick code untouched)
+    // Joystick Touch
+    let startX = 0, startY = 0;
+    
+    // Prevent default touch actions (scrolling)
+    const mobileControls = document.getElementById('mobile-controls');
+    if (mobileControls) {
+        mobileControls.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+    }
+
+    joystickZone.addEventListener('touchstart', (e) => {
+        const touch = e.changedTouches[0];
+        const rect = joystickZone.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        
+        startX = centerX;
+        startY = centerY;
+        
+        updateJoystick(touch.clientX, touch.clientY, centerX, centerY);
+    }, { passive: false });
+
+    joystickZone.addEventListener('touchmove', (e) => {
+        const touch = e.changedTouches[0];
+        const rect = joystickZone.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        
+        updateJoystick(touch.clientX, touch.clientY, centerX, centerY);
+    }, { passive: false });
+
+    joystickZone.addEventListener('touchend', (e) => {
+        joystickVector.x = 0;
+        joystickVector.y = 0;
+        joystickKnob.style.transform = `translate(-50%, -50%)`;
+    });
+
+    function updateJoystick(clientX, clientY, centerX, centerY) {
+        let dx = clientX - centerX;
+        let dy = clientY - centerY;
+        
+        const maxRadius = 50; 
+        const distance = Math.min(Math.sqrt(dx*dx + dy*dy), maxRadius);
+        const angle = Math.atan2(dy, dx);
+        
+        const knobX = Math.cos(angle) * distance;
+        const knobY = Math.sin(angle) * distance;
+        joystickKnob.style.transform = `translate(calc(-50% + ${knobX}px), calc(-50% + ${knobY}px))`;
+        
+        joystickVector.x = knobX / maxRadius;
+        joystickVector.y = knobY / maxRadius;
+    }
 
     // Run Button
     runBtn.addEventListener('touchstart', (e) => {
