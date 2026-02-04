@@ -16,9 +16,17 @@ A cinematic 3D environment built with **Three.js**. This project features an imm
 
 ## Controls
 
+### Desktop
 - **W / A / S / D**: Move Character
+- **Mouse**: Rotate Camera
 - **Space**: Jump
 - **Shift**: Sprint
+
+### Mobile
+- **Left Joystick**: Move
+- **Right Screen**: Rotate Camera
+- **Buttons**: Jump & Run (Sprint)
+- *Note: Best experienced in Landscape mode*
 
 ## Tech Stack
 
