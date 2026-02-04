@@ -1244,6 +1244,18 @@ loadingManager.onLoad = function () {
     
     if (enterButton) {
         enterButton.addEventListener('click', () => {
+            // Request Fullscreen on Mobile
+            if (isMobile) {
+                const docEl = document.documentElement;
+                if (docEl.requestFullscreen) {
+                    docEl.requestFullscreen();
+                } else if (docEl.webkitRequestFullscreen) { /* Safari */
+                    docEl.webkitRequestFullscreen();
+                } else if (docEl.msRequestFullscreen) { /* IE11 */
+                    docEl.msRequestFullscreen();
+                }
+            }
+
             // Resume Audio Context
             if (listener.context.state === 'suspended') {
                 listener.context.resume().then(() => {
