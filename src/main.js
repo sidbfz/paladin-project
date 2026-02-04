@@ -1817,8 +1817,9 @@ function animate() {
     updateWater(performance.now() * 0.001);
 
     let delta = clock.getDelta();
-    // Cap delta to roughly 20 FPS (0.05s) to prevent physics tunnelling during lag spikes
-    if (delta > 0.05) delta = 0.05; 
+    // Cap delta to roughly 10 FPS (0.1s) to prevent massive physics jumps on lag spikes (like changing time)
+    // We increased this from 0.05 to 0.1 because 0.05 made gameplay slow on lower-end devices (running < 20 FPS).
+    if (delta > 0.1) delta = 0.1; 
 
     if (mixer) mixer.update(delta);
     if (envMixer) envMixer.update(delta);
@@ -2068,9 +2069,11 @@ function animate() {
         }
 
         // Raycast AFTER movement to ensure we snap to the correct ground height for the NEW position
-        // FIX: Raycast from Knee Height (0.6) so we stay UNDER roofs
+        // FIX: Dynamic raycast origin.
+        // If we fell a large distance (lag spike), raycast from the previous height to ensure we don't tunnel through the floor.
+        // We use Math.max to pick the highest point between current (head/knees) and old position.
         const rayOrigin = player.position.clone();
-        rayOrigin.y += 0.6; 
+        rayOrigin.y = Math.max(rayOrigin.y + 0.6, oldPosition.y + 0.6);
         
         raycaster.set(rayOrigin, downVector);
         
