@@ -463,7 +463,10 @@ function applyPreset(presetName) {
     const preset = lightingPresets[presetName];
     if (!preset) return;
     
-    currentPreset = presetName;
+    // If loading for the first time or switching presets
+    if (presetName !== currentPreset) {
+         currentPreset = presetName; // Update global state
+    }
     
     // Update Sky
     const skyUniforms = sky.material.uniforms;
@@ -697,7 +700,7 @@ audioLoader.load( 'sounds/river-flow.mp3', function( buffer ) {
         riverSound.setLoopStart(0.5);
         riverSound.setLoopEnd(buffer.duration - 0.5); 
     }
-    riverSound.setVolume( 0.4 );
+    riverSound.setVolume( 1.0 );
     riverSound.play();
 });
 scene.add( riverSound ); // Attach to scene so we can move it freely along the river path
@@ -750,6 +753,7 @@ createMistSystem();
 
 // --- GUI ---
 const gui = new GUI();
+gui.hide(); // Hide the control box by default
 gui.add( riverParams, 'speed', 0, 5 ).name('Flow Speed');
 gui.add( riverParams, 'waveHeight', 0, 1 ).name('Wave Height');
 gui.add( riverParams, 'flowAngle', -180, 180 ).name('Direction');
@@ -779,22 +783,19 @@ folderCinematic.open();
 
 // Improved Clouds
 function addClouds() {
-    // Smoother, fluffier geometry (Icosahedron + subdivision)
-    // or just more puffs. Let's use Icosahedron for a "softer" low poly look.
+    // Smoother, fluffier geometry (Icosahedron)
     const geo = new THREE.IcosahedronGeometry(1, 0); 
     const mat = new THREE.MeshStandardMaterial({ 
         color: 0xffffff, 
         flatShading: true, 
-        roughness: 0.9,  // Matte finish (like cotton)
+        roughness: 0.9,
         metalness: 0.1,
-        emissive: 0xffffff,
-        emissiveIntensity: 0.1,
         transparent: true,
-        opacity: 0.95
+        opacity: 0.6 // Reduced opacity
     });
     
     // Create random cloud clumps
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 50; i++) {
         const cloud = new THREE.Group();
         
         // More puffs for denser, less blocky look
@@ -808,7 +809,7 @@ function addClouds() {
                 (Math.random() - 0.5) * 4
             );
             // Varied sizes
-            const size = 2.5 + Math.random() * 4.5;
+            const size = 3 + Math.random() * 5;
             mesh.scale.setScalar(size);
             
             // Random rotation
@@ -819,21 +820,17 @@ function addClouds() {
             cloud.add(mesh);
         }
         
-        // FIX: Start much higher (70+) to avoid hitting house/land
-        // Range: 70 to 140
+        // Form way higher in the sky (120+)
         cloud.position.set(
-            (Math.random() - 0.5) * 500,
-            70 + Math.random() * 70, 
-            (Math.random() - 0.5) * 500
+            (Math.random() - 0.5) * 400, // Spread over land
+            120 + Math.random() * 100, 
+            (Math.random() - 0.5) * 400
         );
         
         // Slowly float uniformly
         cloud.userData = { speed: 0.5 + Math.random() * 1.5 };
         
         scene.add(cloud);
-        
-        // Add to global update list if needed, or just leave static. 
-        // For now static is fine, but high up.
     }
 }
 addClouds();
@@ -909,7 +906,7 @@ fmLoader.load( 'sounds/fisherman.mp3', function( buffer ) {
     fishermanSound.setRefDistance( 5 ); 
     fishermanSound.setRolloffFactor( 2 );
     fishermanSound.setLoop( false ); // One shot
-    fishermanSound.setVolume( 0.7 );
+    fishermanSound.setVolume( 1.5 );
     
     // Attach to Scene (Static location)
     fishermanSound.position.copy(fishermanSoundPos);
@@ -931,7 +928,7 @@ oxLoader.load( 'sounds/oxen.mp3', function( buffer ) {
     oxenSound.setRefDistance( 5 ); 
     oxenSound.setRolloffFactor( 2 );
     oxenSound.setLoop( false ); // One shot trigger
-    oxenSound.setVolume( 0.7 );
+    oxenSound.setVolume( 1.5 );
     
     // Attach to Scene
     oxenSound.position.copy(oxenPos);
@@ -956,9 +953,9 @@ mooLoader.load( 'sounds/moo.mp3', function( buffer ) {
     cow1Sound.setRefDistance( 5 ); 
     cow1Sound.setRolloffFactor( 2 ); 
     cow1Sound.setLoop( false ); 
-    cow1Sound.setVolume( 0.6 ); // Slightly quieter than oxen
+    cow1Sound.setVolume( 1.0 ); // Reduce vol
     cow1Sound.position.copy(cow1Pos);
-    scene.add(cow1Sound); 
+    scene.add(cow1Sound);  
 
     // Periodic Background Cow 1
     const scheduleCow1 = () => {
@@ -966,7 +963,7 @@ mooLoader.load( 'sounds/moo.mp3', function( buffer ) {
              cow1Sound.setPlaybackRate(0.95 + Math.random() * 0.1); 
              cow1Sound.play();
         }
-        const nextDelay = (Math.random() * 30000) + 15000; 
+        const nextDelay = (Math.random() * 40000) + 40000; 
         setTimeout(scheduleCow1, nextDelay);
     };
     setTimeout(scheduleCow1, Math.random() * 20000);
@@ -979,9 +976,9 @@ mooLoader.load( 'sounds/moo.mp3', function( buffer ) {
     cow2Sound.setRefDistance( 5 ); 
     cow2Sound.setRolloffFactor( 2 ); 
     cow2Sound.setLoop( false ); 
-    cow2Sound.setVolume( 0.8 );
+    cow2Sound.setVolume( 1.0 ); // Reduce vol
     cow2Sound.position.copy(cow2Pos);
-    scene.add(cow2Sound); 
+    scene.add(cow2Sound);  
 
     // Periodic Background Cow 2
     const scheduleCow2 = () => {
@@ -989,7 +986,7 @@ mooLoader.load( 'sounds/moo.mp3', function( buffer ) {
              cow2Sound.setPlaybackRate(0.95 + Math.random() * 0.1); 
              cow2Sound.play();
         }
-        const nextDelay = (Math.random() * 30000) + 15000; 
+        const nextDelay = (Math.random() * 40000) + 40000; 
         setTimeout(scheduleCow2, nextDelay);
     };
     setTimeout(scheduleCow2, Math.random() * 20000);
@@ -1002,9 +999,9 @@ mooLoader.load( 'sounds/moo.mp3', function( buffer ) {
     cow3Sound.setRefDistance( 5 ); 
     cow3Sound.setRolloffFactor( 2 ); 
     cow3Sound.setLoop( false ); 
-    cow3Sound.setVolume( 0.8 );
+    cow3Sound.setVolume( 1.0 ); // Reduce vol
     cow3Sound.position.copy(cow3Pos);
-    scene.add(cow3Sound); 
+    scene.add(cow3Sound);  
 
     // Periodic Background Cow 3
     const scheduleCow3 = () => {
@@ -1012,7 +1009,7 @@ mooLoader.load( 'sounds/moo.mp3', function( buffer ) {
              cow3Sound.setPlaybackRate(0.95 + Math.random() * 0.1); 
              cow3Sound.play();
         }
-        const nextDelay = (Math.random() * 30000) + 15000; 
+        const nextDelay = (Math.random() * 40000) + 40000; 
         setTimeout(scheduleCow3, nextDelay);
     };
     setTimeout(scheduleCow3, Math.random() * 20000);
@@ -1051,7 +1048,7 @@ sheepPositions.forEach((pos) => {
         sound.setRefDistance(4);
         sound.setRolloffFactor(2.5);
         sound.setLoop(false);
-        sound.setVolume(0.4); // Baa is distinct but small
+        sound.setVolume(0.5); // Baa is quiet
         sound.position.copy(pos);
         scene.add(sound);
 
@@ -1061,8 +1058,8 @@ sheepPositions.forEach((pos) => {
                  sound.setPlaybackRate(0.9 + Math.random() * 0.2); // Random pitch
                  sound.play();
             }
-            // Schedule next baa between 10s and 40s
-            const nextDelay = (Math.random() * 30000) + 10000; 
+            // Schedule next baa between 60s and 180s (1-3 mins)
+            const nextDelay = (Math.random() * 60000) + 120000; 
             setTimeout(scheduleBaa, nextDelay);
         };
         
@@ -1103,8 +1100,51 @@ document.addEventListener('keyup', (event) => {
 });
 
 // Loaders
-const gltfLoader = new GLTFLoader();
-const fbxLoader = new FBXLoader();
+const loadingManager = new THREE.LoadingManager();
+
+loadingManager.onProgress = function ( url, itemsLoaded, itemsTotal ) {
+    const loadingBar = document.getElementById('loading-bar');
+    
+    if (loadingBar && itemsTotal > 0) {
+        const progress = (itemsLoaded / itemsTotal) * 100;
+        loadingBar.style.width = progress + '%';
+    }
+};
+
+loadingManager.onLoad = function () {
+    const loaderContainer = document.getElementById('loader-container');
+    const startContainer = document.getElementById('start-container');
+    const enterButton = document.getElementById('enter-button');
+    const loadingScreen = document.getElementById('loading-screen');
+    
+    if (loaderContainer) loaderContainer.style.display = 'none';
+    if (startContainer) startContainer.style.display = 'flex';
+    
+    if (enterButton) {
+        enterButton.addEventListener('click', () => {
+            // Resume Audio Context
+            if (listener.context.state === 'suspended') {
+                listener.context.resume().then(() => {
+                    console.log('AudioContext resumed');
+                });
+            }
+            
+            // Hide loading screen
+            if (loadingScreen) {
+                loadingScreen.style.opacity = '0';
+                setTimeout(() => {
+                    loadingScreen.remove();
+                }, 1500); 
+            }
+        });
+    }
+
+    // Initialize the default preset (including audio) when loading is done
+    applyPreset(currentPreset);
+};
+
+const gltfLoader = new GLTFLoader(loadingManager);
+const fbxLoader = new FBXLoader(loadingManager);
 
 // Load Environment (Book)
 // Note: We need to see how big the book is. Maybe we need to scale it up.
@@ -1165,7 +1205,7 @@ gltfLoader.load('/models/medieval_fantasy_book.glb', (gltf) => {
                     windSound.setLoopStart(0.5);
                     windSound.setLoopEnd(buffer.duration - 0.5); 
                 }
-                windSound.setVolume( 0.7 );
+                windSound.setVolume( 1.5 );
                 windSound.play();
             });
             child.add( windSound );
@@ -1184,7 +1224,7 @@ gltfLoader.load('/models/medieval_fantasy_book.glb', (gltf) => {
                     wmSound.setLoopStart(0.5);
                     wmSound.setLoopEnd(buffer.duration - 0.5); 
                 }
-                wmSound.setVolume( 0.5 );
+                wmSound.setVolume( 1.2 );
                 wmSound.play();
             });
             child.add( wmSound );
@@ -1207,15 +1247,15 @@ gltfLoader.load('/models/medieval_fantasy_book.glb', (gltf) => {
                 deerSound.setRefDistance( 12 );
                 deerSound.setRolloffFactor( 2.0 );
                 deerSound.setLoop( false ); 
-                deerSound.setVolume( 0.6 );
+                deerSound.setVolume( 0.75 );
                 
                 // Periodic Background "Call"
                 const scheduleDeer = () => {
                     if (!deerSound.isPlaying) {
                         deerSound.play();
                     }
-                    // Deer calls are sparse (15-30s)
-                    const nextDelay = (Math.random() * 15000) + 15000;
+                    // Deer calls are sparse (40-100s)
+                    const nextDelay = (Math.random() * 40000) + 60000;
                     setTimeout(scheduleDeer, nextDelay);
                 };
                 setTimeout(scheduleDeer, Math.random() * 10000);
@@ -1236,7 +1276,7 @@ gltfLoader.load('/models/medieval_fantasy_book.glb', (gltf) => {
                     flagSound.setLoopStart(0.5);
                     flagSound.setLoopEnd(buffer.duration - 0.5); 
                 }
-                flagSound.setVolume( 0.6 ); 
+                flagSound.setVolume( 1.5 ); 
                 // Random start time to avoid phasing if identical flags
                 setTimeout(() => {
                     if(!flagSound.isPlaying) flagSound.play();
@@ -1271,8 +1311,9 @@ fbxLoader.load('/models/Pro Sword and Shield Pack (1)/Paladin WProp J Nordstrom.
     // Increased from 0.013 to 0.015 for a little bigger character
     character.scale.set(0.015, 0.015, 0.015); 
     
-    // Spawn high up to ensure Raycast snaps down correctly (avoids getting stuck below ground)
-    character.position.set(0, 40, 0); // Explicitly set X, Y, Z to be sure 
+    // Set spawn point as requested
+    character.position.set(1.19, 29.99, -3.95); 
+    character.rotation.y = Math.PI; // Turn 180 degrees to face opposite direction
 
     character.traverse((child) => {
         if (child.isMesh) {
@@ -1284,6 +1325,17 @@ fbxLoader.load('/models/Pro Sword and Shield Pack (1)/Paladin WProp J Nordstrom.
     scene.add(character);
     player = character;
 
+    // Immediately update camera to follow character spawn
+    // Character is now facing +Z (Math.PI). We want camera BEHIND them (at -Z).
+    const camDist = 3.5;
+    const camHeight = 1.5;
+    
+    camera.position.copy(player.position);
+    camera.position.y += camHeight;
+    camera.position.z -= camDist; // Move behind character (who is facing +Z)
+    
+    camera.lookAt(player.position.x, player.position.y + 1.0, player.position.z);
+
     // --- AUDIO: FOOTSTEPS ---
     const stepLoader = new THREE.AudioLoader();
     footstepSound = new THREE.PositionalAudio( listener );
@@ -1292,7 +1344,7 @@ fbxLoader.load('/models/Pro Sword and Shield Pack (1)/Paladin WProp J Nordstrom.
         footstepSound.setRefDistance( 2 ); 
         footstepSound.setRolloffFactor( 2 );
         footstepSound.setLoop( false );
-        footstepSound.setVolume( 0.4 ); // Not too loud
+        footstepSound.setVolume( 1.3 ); // Not too loud
         player.add( footstepSound );
     });
 
@@ -1305,7 +1357,7 @@ fbxLoader.load('/models/Pro Sword and Shield Pack (1)/Paladin WProp J Nordstrom.
         jumpStartSound.setRefDistance( 5 ); 
         jumpStartSound.setRolloffFactor( 1 );
         jumpStartSound.setLoop( false );
-        jumpStartSound.setVolume( 1.2 ); 
+        jumpStartSound.setVolume( 1.5 ); 
         player.add( jumpStartSound );
     });
 
@@ -1317,7 +1369,7 @@ fbxLoader.load('/models/Pro Sword and Shield Pack (1)/Paladin WProp J Nordstrom.
         jumpEndSound.setRefDistance( 5 );
         jumpEndSound.setRolloffFactor( 1 );
         jumpEndSound.setLoop( false );
-        jumpEndSound.setVolume( 1.2 ); 
+        jumpEndSound.setVolume( 1.5 ); 
         player.add( jumpEndSound );
     });
 
@@ -2091,7 +2143,7 @@ function createWaterfall() {
             wfSound1.setLoopStart(0.5);
             wfSound1.setLoopEnd(buffer.duration - 0.5); 
         }
-        wfSound1.setVolume( 0.6 );
+        wfSound1.setVolume( 1.5 );
         wfSound1.play();
         waterfall.add( wfSound1 ); // Attached to mesh
 
@@ -2105,7 +2157,7 @@ function createWaterfall() {
             wfSound2.setLoopStart(0.5);
             wfSound2.setLoopEnd(buffer.duration - 0.5); 
         }
-        wfSound2.setVolume( 0.6 );
+        wfSound2.setVolume( 1.5 );
         wfSound2.play();
         waterfall2.add( wfSound2 ); // Attached to mesh
     });
